@@ -34,5 +34,6 @@ max_duration_sec: 30.0           # Whisper processes up to 30 s per chunk
 lowercase: true                  # for normalized WER (we also keep raw transcript)
 
 # Output
-output_dir: data/afrispeech_ng   # save_to_disk target + manifest.csv location
+output_dir: data/afrispeech_ng   # local save_to_disk target + manifest.csv location
+hf_curated_repo: Johniblazee/naija-speech-afrispeech-ng   # private HF dataset (push target)
 seed: 42

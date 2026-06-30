@@ -26,6 +26,8 @@ def main() -> None:
                     help="Cap examples per accent/split (fast iteration).")
     ap.add_argument("--peek", action="store_true",
                     help="Stream a few rows per accent without a full download.")
+    ap.add_argument("--push", action="store_true",
+                    help="Push the curated corpus to the private HF dataset (hf_curated_repo).")
     args = ap.parse_args()
 
     load_dotenv()
@@ -41,7 +43,8 @@ def main() -> None:
             print(f"  [{r['macro_accent']}/{r['domain']}] {(r['transcript'] or '')[:70]}")
         return
 
-    dsd = corpus.build_corpus(cfg, max_per_split=args.max_per_split)
+    push_repo = cfg.get("hf_curated_repo") if args.push else None
+    dsd = corpus.build_corpus(cfg, max_per_split=args.max_per_split, push_repo=push_repo)
     print("\n=== Corpus summary ===")
     print(json.dumps(corpus.summarize(dsd), indent=2, ensure_ascii=False))
 

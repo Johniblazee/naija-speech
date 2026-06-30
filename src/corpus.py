@@ -76,11 +76,14 @@ def _keep_row(country: str, duration: float, cfg: dict[str, Any]) -> bool:
     return True
 
 
-def build_corpus(cfg: dict[str, Any], max_per_split: int | None = None):
+def build_corpus(cfg: dict[str, Any], max_per_split: int | None = None,
+                 push_repo: str | None = None):
     """Build and persist the corpus. Returns the saved DatasetDict.
 
     `max_per_split` caps examples per accent/split for fast iteration (note: the
     full accent shards are still downloaded by `load_dataset`).
+    `push_repo` (e.g. "user/name") also pushes the curated DatasetDict to a
+    private HF dataset for streaming into training.
     """
     from datasets import Audio, DatasetDict, concatenate_datasets, load_dataset
 
@@ -120,6 +123,9 @@ def build_corpus(cfg: dict[str, Any], max_per_split: int | None = None):
     os.makedirs(output_dir, exist_ok=True)
     out.save_to_disk(output_dir)
     _write_manifest(out, output_dir)
+    if push_repo:
+        print(f"[corpus] pushing to private HF dataset: {push_repo}")
+        out.push_to_hub(push_repo, private=True)
     return out
 
 
