@@ -1,0 +1,38 @@
+# Corpus configuration: Nigerian-accented English from AfriSpeech-200.
+#
+# We load AfriSpeech-200 by per-accent config (efficient: only downloads the
+# accents we ask for) for the three macro-accents the thesis targets, then
+# additionally keep only country == "NG" rows as a safety filter.
+
+source: afrispeech-200
+hf_dataset_id: tobiolatunji/afrispeech-200
+license: CC-BY-NC-SA-4.0          # non-commercial; research use only
+country_filter: NG               # keep only Nigerian clips
+
+# Per-accent HF configs to load for the first corpus pass. These map directly
+# to the thesis macro-accents. Add more Nigerian accents later (e.g. ijaw, edo,
+# idoma, igala, ibibio, efik, urhobo) or switch to the "all" config + country
+# filter for full Nigerian coverage.
+accents:
+  - igbo
+  - yoruba
+  - hausa
+
+# accent (raw) -> macro-accent (thesis grouping)
+macro_accent_map:
+  yoruba: Yoruba
+  igbo: Igbo
+  hausa: Hausa
+  # anything else falls back to "Other"
+
+# Audio
+target_sample_rate: 16000        # Whisper expects 16 kHz mono
+min_duration_sec: 0.5
+max_duration_sec: 30.0           # Whisper processes up to 30 s per chunk
+
+# Text
+lowercase: true                  # for normalized WER (we also keep raw transcript)
+
+# Output
+output_dir: data/afrispeech_ng   # save_to_disk target + manifest.csv location
+seed: 42

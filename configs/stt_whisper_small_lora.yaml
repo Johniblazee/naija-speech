@@ -1,0 +1,41 @@
+# STT fine-tuning configuration: Whisper + LoRA.
+#
+# Start with whisper-small to validate the pipeline cheaply on a free Colab T4.
+# To scale up, change model_id to "openai/whisper-large-v3" and set
+# load_in_8bit: true (requires bitsandbytes + a larger GPU, e.g. rented A100).
+
+model_id: openai/whisper-small
+language: english
+task: transcribe
+
+corpus_dir: data/afrispeech_ng     # produced by 01_build_corpus.py
+
+# LoRA (parameter-efficient fine-tuning)
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.05
+  target_modules: [q_proj, v_proj]
+
+# Loading
+load_in_8bit: false                # set true for whisper-large-v3 on a big GPU
+
+# Training
+output_dir: outputs/whisper_small_lora
+per_device_train_batch_size: 16
+per_device_eval_batch_size: 8
+gradient_accumulation_steps: 1
+learning_rate: 0.001
+warmup_steps: 50
+num_train_epochs: 3
+max_steps: -1                      # -1 = use epochs; set a positive int for a quick smoke run
+eval_strategy: steps
+eval_steps: 200
+save_steps: 200
+logging_steps: 25
+fp16: true                         # GPU only
+generation_max_length: 225
+seed: 42
+
+# Evaluation output
+results_dir: outputs/whisper_small_lora/results

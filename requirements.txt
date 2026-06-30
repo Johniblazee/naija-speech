@@ -1,0 +1,26 @@
+# Core ML
+torch>=2.1
+transformers>=4.44
+datasets>=2.20,<4.0   # AfriSpeech-200 uses a loading script (removed in datasets 4.x)
+accelerate>=0.33
+peft>=0.12
+
+# Audio
+librosa>=0.10
+soundfile>=0.12
+
+# Metrics
+jiwer>=3.0
+evaluate>=0.4
+
+# Experiment tracking
+comet_ml>=3.40
+
+# Utilities
+pyyaml>=6.0
+pandas>=2.0
+tqdm>=4.66
+
+# Optional (GPU/Linux only) — needed for 8-bit loading of whisper-large-v3 (QLoRA-style)
+# Install on Colab/RunPod, not required for whisper-small:
+# bitsandbytes>=0.43

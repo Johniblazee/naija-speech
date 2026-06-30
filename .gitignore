@@ -1,0 +1,21 @@
+# Environments
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+
+# Data & model artifacts (large; regenerate via scripts)
+data/
+outputs/
+checkpoints/
+*.ckpt
+*.safetensors
+wandb/
+.comet.config
+
+# OS / editor
+.DS_Store
+.ipynb_checkpoints/
