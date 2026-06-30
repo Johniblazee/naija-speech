@@ -12,8 +12,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from naija_speech import eda  # noqa: E402
-from naija_speech.config import load_dotenv, load_yaml  # noqa: E402
+import eda  # noqa: E402
+from config import load_dotenv, load_yaml  # noqa: E402
 
 
 def main() -> None:
@@ -40,7 +40,7 @@ def main() -> None:
     print(f"Report: {report}")
 
     if args.wandb:
-        from naija_speech.tracking import maybe_log_wandb_tables
+        from tracking import maybe_log_wandb_tables
 
         maybe_log_wandb_tables(eda.summary_tables(df), project=os.environ.get("WANDB_PROJECT", "naija-speech"))
 

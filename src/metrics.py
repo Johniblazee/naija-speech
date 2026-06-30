@@ -13,7 +13,7 @@ from typing import Iterable, Sequence
 
 import jiwer
 
-from .text_normalization import normalize_text
+from text_normalization import normalize_text
 
 
 def compute_wer_cer(

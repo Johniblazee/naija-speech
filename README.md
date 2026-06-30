@@ -26,9 +26,10 @@ strategy described in the thesis methodology.
 
 | Step | Script | What it does |
 |------|--------|--------------|
+| 0 | `scripts/00_eda.py` | EDA on the Nigerian subset (metadata only — no audio): accent/domain/gender distributions, disparity, report + figures. |
 | 1 | `scripts/01_build_corpus.py` | Download Nigerian AfriSpeech-200 accents, normalize text, build a manifest + speaker-disjoint splits, save to disk. |
 | 2 | `scripts/02_zeroshot_baseline.py` | Measure the **gap**: zero-shot Whisper WER/CER on the Nigerian test set, stratified by accent and domain. |
-| 3 | `scripts/03_finetune_whisper_lora.py` | LoRA fine-tune Whisper; log to Comet. |
+| 3 | `scripts/03_finetune_whisper_lora.py` | LoRA fine-tune Whisper; log to W&B. |
 | 4 | `scripts/04_evaluate.py` | Evaluate the fine-tuned model; produce the accuracy + fairness tables for Chapter 5. |
 
 ## Setup
@@ -36,7 +37,7 @@ strategy described in the thesis methodology.
 ```bash
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env                                   # then fill in COMET_API_KEY + HF_TOKEN
+cp .env.example .env                                   # then fill in WANDB_API_KEY + HF_TOKEN
 ```
 
 On Google Colab / RunPod, run the same `pip install` and set the env vars in the notebook/shell.
@@ -50,8 +51,8 @@ On Google Colab / RunPod, run the same `pip install` and set the env vars in the
 
 ## Tracking
 
-Experiment metrics (loss, WER/CER, hyperparameters) go to **Comet** (Experiment Management).
-Set `COMET_API_KEY`, `COMET_WORKSPACE`, and `COMET_PROJECT_NAME` in `.env`.
+Experiment metrics (loss, WER/CER, hyperparameters) go to **Weights & Biases**.
+Set `WANDB_API_KEY`, `WANDB_ENTITY`, and `WANDB_PROJECT` in `.env`.
 
 ## Data & licensing
 
@@ -64,12 +65,14 @@ Set `COMET_API_KEY`, `COMET_WORKSPACE`, and `COMET_PROJECT_NAME` in `.env`.
 ```
 naija-speech/
 ├── configs/                  # YAML configs for data + models
-├── src/naija_speech/         # importable library code
-│   ├── config.py             # tiny YAML config loader
+├── src/                      # library modules (added to sys.path by scripts)
+│   ├── config.py             # tiny YAML/.env loader
 │   ├── text_normalization.py # transcript normalization (preserves Nigerian lexis)
 │   ├── metrics.py            # WER/CER, overall + stratified
+│   ├── eda.py                # metadata-only EDA (distributions, report)
 │   ├── corpus.py             # build the Nigerian corpus + manifest + splits
-│   └── whisper_lora.py       # Whisper + LoRA model/processor/collator helpers
-├── scripts/                  # thin CLI entry points (run in order)
+│   ├── whisper_lora.py       # Whisper + LoRA model/processor/collator helpers
+│   └── tracking.py           # optional W&B logging
+├── scripts/                  # thin CLI entry points (00_eda → 04_evaluate)
 └── requirements.txt
 ```

@@ -15,8 +15,8 @@ from collections import Counter
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from naija_speech import corpus  # noqa: E402
-from naija_speech.config import load_dotenv, load_yaml  # noqa: E402
+import corpus  # noqa: E402
+from config import load_dotenv, load_yaml  # noqa: E402
 
 
 def main() -> None:

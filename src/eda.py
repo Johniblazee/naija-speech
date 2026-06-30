@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .corpus import macro_accent
+from corpus import macro_accent
 
 _RAW = "https://huggingface.co/datasets/{ds}/raw/main/transcripts/{split}.csv"
 _SPLITS = ("train", "dev", "test")

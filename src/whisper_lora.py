@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .metrics import compute_wer_cer
+from metrics import compute_wer_cer
 
 
 def build_processor(cfg: dict[str, Any]):

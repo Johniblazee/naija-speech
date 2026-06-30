@@ -15,8 +15,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from naija_speech.config import load_dotenv, load_yaml  # noqa: E402
-from naija_speech.whisper_lora import (  # noqa: E402
+from config import load_dotenv, load_yaml  # noqa: E402
+from whisper_lora import (  # noqa: E402
     DataCollatorSpeechSeq2SeqWithPadding,
     apply_lora,
     build_processor,

@@ -19,7 +19,7 @@ import os
 from collections import Counter
 from typing import Any
 
-from .text_normalization import normalize_text
+from text_normalization import normalize_text
 
 # Splits as named by the AfriSpeech-200 loading script (dev -> validation).
 _SPLITS = ("train", "validation", "test")

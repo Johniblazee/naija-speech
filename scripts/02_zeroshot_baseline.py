@@ -17,10 +17,10 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from naija_speech.config import load_dotenv, load_yaml  # noqa: E402
-from naija_speech.metrics import compute_stratified  # noqa: E402
-from naija_speech.tracking import maybe_log_wandb  # noqa: E402
-from naija_speech.whisper_lora import build_processor, transcribe_dataset  # noqa: E402
+from config import load_dotenv, load_yaml  # noqa: E402
+from metrics import compute_stratified  # noqa: E402
+from tracking import maybe_log_wandb  # noqa: E402
+from whisper_lora import build_processor, transcribe_dataset  # noqa: E402
 
 
 def write_results_csv(results: list[dict], path: str) -> None:
