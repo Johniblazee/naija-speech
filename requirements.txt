@@ -14,13 +14,15 @@ jiwer>=3.0
 evaluate>=0.4
 
 # Experiment tracking
-comet_ml>=3.40
+wandb>=0.17
 
-# Utilities
+# EDA + utilities
 pyyaml>=6.0
 pandas>=2.0
+matplotlib>=3.7
+tabulate>=0.9        # pandas .to_markdown() for the EDA report
 tqdm>=4.66
 
-# Optional (GPU/Linux only) — needed for 8-bit loading of whisper-large-v3 (QLoRA-style)
-# Install on Colab/RunPod, not required for whisper-small:
-# bitsandbytes>=0.43
+# Optional (GPU/Linux only) — install on Colab/RunPod:
+# unsloth                 # faster/lower-VRAM Whisper fine-tuning (primary STT backend)
+# bitsandbytes>=0.43      # 8-bit loading of whisper-large-v3 (QLoRA-style)

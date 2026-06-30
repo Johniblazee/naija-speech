@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from naija_speech.config import load_dotenv, load_yaml  # noqa: E402
 from naija_speech.metrics import compute_stratified  # noqa: E402
-from naija_speech.tracking import maybe_log_comet  # noqa: E402
+from naija_speech.tracking import maybe_log_wandb  # noqa: E402
 from naija_speech.whisper_lora import build_processor, transcribe_dataset  # noqa: E402
 
 
@@ -89,7 +89,7 @@ def main() -> None:
     write_results_csv(results, args.out)
     print(f"\nWrote results to {args.out}")
 
-    maybe_log_comet(
+    maybe_log_wandb(
         results,
         params={
             "stage": "zero-shot-baseline",

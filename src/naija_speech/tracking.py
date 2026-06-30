@@ -1,42 +1,43 @@
-"""Comet experiment-tracking helpers (optional; no-op without an API key)."""
+"""Weights & Biases tracking helpers (optional; no-op without WANDB_API_KEY)."""
 from __future__ import annotations
 
 import os
 from typing import Any
 
 
-def maybe_log_comet(
-    results: list[dict],
-    params: dict[str, Any],
-    project: str | None = None,
-    name: str | None = None,
-):
-    """Log stratified WER/CER results to Comet if COMET_API_KEY is set.
+def _project(project: str | None) -> str:
+    return project or os.environ.get("WANDB_PROJECT", "naija-speech")
 
-    Safe to call unconditionally: prints and returns None when no key is present
-    or comet_ml is unavailable.
-    """
-    if not os.environ.get("COMET_API_KEY"):
-        print("[comet] COMET_API_KEY not set — skipping logging.")
-        return None
-    try:
-        import comet_ml
 
-        exp = comet_ml.Experiment(
-            project_name=project or os.environ.get("COMET_PROJECT_NAME", "naija-speech-stt"),
-        )
-        if name:
-            exp.set_name(name)
-        exp.log_parameters(params)
-        for r in results:
-            if not r.get("n"):
-                continue
-            tag = f"{r['group']}/{r['key']}"
-            exp.log_metric(f"WER/{tag}", r["wer"])
-            exp.log_metric(f"CER/{tag}", r["cer"])
-        exp.end()
-        print("[comet] logged experiment.")
-        return exp
-    except Exception as e:  # noqa: BLE001
-        print(f"[comet] logging failed: {e}")
+def maybe_log_wandb(results: list[dict], params: dict[str, Any],
+                    project: str | None = None, name: str | None = None):
+    """Log stratified WER/CER to W&B if WANDB_API_KEY is set; else no-op."""
+    if not os.environ.get("WANDB_API_KEY"):
+        print("[wandb] WANDB_API_KEY not set — skipping logging.")
         return None
+    import wandb
+
+    run = wandb.init(project=_project(project), name=name, config=params)
+    for r in results:
+        if not r.get("n"):
+            continue
+        tag = f"{r['group']}/{r['key']}"
+        run.log({f"WER/{tag}": r["wer"], f"CER/{tag}": r["cer"]})
+    run.finish()
+    print("[wandb] logged run.")
+    return run
+
+
+def maybe_log_wandb_tables(tables: dict, project: str | None = None, name: str | None = None):
+    """Log EDA summary tables (dict of DataFrames) to W&B; else no-op."""
+    if not os.environ.get("WANDB_API_KEY"):
+        print("[wandb] WANDB_API_KEY not set — skipping EDA logging.")
+        return None
+    import wandb
+
+    run = wandb.init(project=_project(project), name=name or "eda", job_type="eda")
+    for key, df in tables.items():
+        run.log({f"eda/{key}": wandb.Table(dataframe=df.reset_index())})
+    run.finish()
+    print("[wandb] logged EDA tables.")
+    return run

@@ -40,10 +40,8 @@ def main() -> None:
     if args.max_steps is not None:
         cfg["max_steps"] = args.max_steps
 
-    # Comet auto-logging via the Trainer reads these env vars.
-    use_comet = bool(os.environ.get("COMET_API_KEY"))
-    if use_comet and os.environ.get("COMET_PROJECT_NAME"):
-        os.environ.setdefault("COMET_PROJECT_NAME", os.environ["COMET_PROJECT_NAME"])
+    # W&B auto-logging via the Trainer reads WANDB_* env vars.
+    use_wandb = bool(os.environ.get("WANDB_API_KEY"))
 
     from datasets import load_from_disk
     from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments
@@ -83,7 +81,7 @@ def main() -> None:
         logging_steps=cfg["logging_steps"],
         predict_with_generate=True,
         generation_max_length=cfg["generation_max_length"],
-        report_to=["comet_ml"] if use_comet else ["none"],
+        report_to=["wandb"] if use_wandb else ["none"],
         remove_unused_columns=False,   # required: our collator reads custom columns
         label_names=["labels"],        # required for PEFT + Seq2SeqTrainer
         seed=cfg["seed"],
