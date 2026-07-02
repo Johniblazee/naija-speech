@@ -43,8 +43,15 @@ def main() -> None:
             print(f"  [{r['macro_accent']}/{r['domain']}] {(r['transcript'] or '')[:70]}")
         return
 
-    push_repo = cfg.get("hf_curated_repo") if args.push else None
-    dsd = corpus.build_corpus(cfg, max_per_split=args.max_per_split, push_repo=push_repo)
+    if args.push:
+        # Disk-safe: stream source -> unified schema -> upload Parquet shards to HF.
+        from curate import curate_to_hub
+
+        curate_to_hub(cfg, cfg["hf_curated_repo"], limit=args.max_per_split)
+        return
+
+    # Local (disk) build — for small local tests only; use --push for Colab/HF.
+    dsd = corpus.build_corpus(cfg, max_per_split=args.max_per_split)
     print("\n=== Corpus summary ===")
     print(json.dumps(corpus.summarize(dsd), indent=2, ensure_ascii=False))
 

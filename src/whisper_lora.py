@@ -59,14 +59,14 @@ def apply_lora(model, cfg: dict[str, Any]):
 
 
 def make_prepare_fn(processor):
-    """Return a `.map` function turning (audio, transcript_norm) -> model inputs."""
+    """Return a `.map` function turning (audio, text) -> model inputs."""
 
     def prepare(batch):
         audio = batch["audio"]
         batch["input_features"] = processor.feature_extractor(
             audio["array"], sampling_rate=audio["sampling_rate"]
         ).input_features[0]
-        batch["labels"] = processor.tokenizer(batch["transcript_norm"]).input_ids
+        batch["labels"] = processor.tokenizer(batch["text"]).input_ids
         return batch
 
     return prepare

@@ -54,10 +54,9 @@ def main() -> None:
     data_cfg = load_yaml(args.data_config)
     model_cfg = load_yaml(args.model_config)
 
-    from datasets import load_from_disk
+    from curate import load_curated
 
-    dsd = load_from_disk(data_cfg["output_dir"])
-    ds = dsd[args.split]
+    ds = load_curated(data_cfg["hf_curated_repo"], split=args.split)
     if args.limit:
         ds = ds.select(range(min(args.limit, ds.num_rows)))
     print(f"Evaluating {ds.num_rows} clips from split '{args.split}' "
@@ -76,7 +75,7 @@ def main() -> None:
 
     rows = [
         {
-            "reference": ds[i]["transcript_raw"],
+            "reference": ds[i]["text_raw"],
             "hypothesis": hyps[i],
             "macro_accent": ds[i]["macro_accent"],
             "domain": ds[i]["domain"],

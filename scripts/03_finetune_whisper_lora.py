@@ -43,11 +43,11 @@ def main() -> None:
     # W&B auto-logging via the Trainer reads WANDB_* env vars.
     use_wandb = bool(os.environ.get("WANDB_API_KEY"))
 
-    from datasets import load_from_disk
+    from curate import load_curated
     from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments
 
     processor = build_processor(cfg)
-    dsd = load_from_disk(data_cfg["output_dir"])
+    dsd = load_curated(data_cfg["hf_curated_repo"])
 
     prepare = make_prepare_fn(processor)
     train_ds = dsd["train"].map(prepare, remove_columns=dsd["train"].column_names,

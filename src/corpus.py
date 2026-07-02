@@ -49,8 +49,8 @@ def _standardize(ds, cfg: dict[str, Any]):
         return {
             "clip_id": str(ex.get("audio_id") or ex.get("audio_ids") or ex.get("path") or ""),
             "speaker_id": str(ex.get("user_id") or ex.get("user_ids") or ""),
-            "transcript_raw": transcript,
-            "transcript_norm": normalize_text(transcript, lowercase),
+            "text_raw": transcript,
+            "text": normalize_text(transcript, lowercase),
             "accent_raw": raw_accent,
             "macro_accent": macro_accent(raw_accent, macro_map),
             "domain": ex.get("domain") or "unknown",
