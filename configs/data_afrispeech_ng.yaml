@@ -4,7 +4,10 @@
 # accents we ask for) for the three macro-accents the thesis targets, then
 # additionally keep only country == "NG" rows as a safety filter.
 
-source: afrispeech-200
+source: afrispeech-200            # primary source (used by the afrispeech-200 adapter)
+sources:                          # all curated together into ONE unified corpus
+  - afrispeech-200
+  - afrispeech-dialog
 hf_dataset_id: tobiolatunji/afrispeech-200
 license: CC-BY-NC-SA-4.0          # non-commercial; research use only
 country_filter: NG               # keep only Nigerian clips
