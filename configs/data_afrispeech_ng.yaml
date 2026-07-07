@@ -21,6 +21,16 @@ accents:
   - yoruba
   - hausa
 
+# Which AfriSpeech-200 HF configs the curation adapter streams. "all" = the entire
+# corpus, then country_filter keeps only Nigerian clips (NG is ~70% of AfriSpeech-200,
+# so filtering "all" is both complete AND efficient). For a fast, thesis-core run,
+# comment "all" and uncomment the three macro-accents instead.
+afrispeech_configs:
+  - all
+  # - igbo
+  # - yoruba
+  # - hausa
+
 # accent (raw) -> macro-accent (thesis grouping)
 macro_accent_map:
   yoruba: Yoruba

@@ -67,13 +67,16 @@ def afrispeech_stream(cfg: dict, split: str) -> Iterator[dict]:
 
     macro_map = _macro_map(cfg)
     src_split = _AFRISPEECH_SPLIT[split]
-    for accent in cfg["accents"]:
+    # "all" (default) streams the whole corpus; country_filter keeps NG. The per-row
+    # accent below still comes from ex["accent"], so macro-mapping is unaffected.
+    configs = cfg.get("afrispeech_configs") or cfg["accents"]
+    for cfg_name in configs:
         try:
-            ds = load_dataset(cfg["hf_dataset_id"], accent, split=src_split,
+            ds = load_dataset(cfg["hf_dataset_id"], cfg_name, split=src_split,
                               streaming=True, trust_remote_code=True)
             ds = ds.cast_column("audio", Audio(decode=False))  # keep bytes, don't decode
         except Exception as e:  # noqa: BLE001
-            print(f"  [warn] afrispeech-200 {accent}/{src_split}: {e}")
+            print(f"  [warn] afrispeech-200 {cfg_name}/{src_split}: {e}")
             continue
         for ex in ds:
             if cfg.get("country_filter") and ex.get("country") != cfg["country_filter"]:
