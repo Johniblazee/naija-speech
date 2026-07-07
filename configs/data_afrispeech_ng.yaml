@@ -23,12 +23,10 @@ accents:
 
 # Which AfriSpeech-200 HF configs the curation adapter streams, ONE AT A TIME — each
 # config is a resumable checkpoint (see --resume). Leave UNSET (default) to stream
-# every per-accent config: full NG coverage (country_filter keeps NG) AND resumable.
-# Or set it explicitly to trade coverage/speed:
-#   [all]                  one complete pass, but a single non-resumable unit
+# ONLY Nigerian accents: the adapter reads the transcript manifest, keeps accents with
+# NG clips, and skips the ~80 non-Nigerian configs (no wasted download). Or set it:
+#   [all]                  the whole corpus in one non-resumable unit (ALL countries)
 #   [igbo, yoruba, hausa]  fast, thesis-core subset only
-# Tip: an explicit Nigerian-accent list cuts ~30% bandwidth (skips non-NG configs)
-# at the cost of possibly missing a rare accent.
 # afrispeech_configs:
 #   - igbo
 #   - yoruba

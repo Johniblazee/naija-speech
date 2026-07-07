@@ -63,25 +63,45 @@ def _macro_map(cfg):
 # --------------------------------------------------------------------------- #
 # Source adapters
 # --------------------------------------------------------------------------- #
+_NG_CONFIG_CACHE: dict = {}  # ponytail: memo the NG-accent list across the 3 split calls
+
+
 def afrispeech_units(cfg: dict, split: str) -> list[str]:
     """Resumable units for AfriSpeech-200 = the HF configs we stream, one at a time.
 
-    - `afrispeech_configs` set in cfg  -> stream exactly those (e.g. [igbo, yoruba, hausa]
-      for a fast run, or [all] for one complete-but-not-resumable pass).
-    - unset (default)                  -> every per-accent config (excluding the aggregate
-      "all"), so each accent is its own checkpoint. Coverage == "all", but resumable.
+    - `afrispeech_configs` set in cfg -> stream exactly those (e.g. [igbo, yoruba, hausa],
+      or [all] for the whole corpus, all countries).
+    - unset (default) -> NIGERIAN ACCENTS ONLY: read the transcript manifest, keep the
+      accents that have NG clips, intersect with the dataset's real config names. Skips
+      the ~80 non-Nigerian configs entirely (no wasted download); country_filter still
+      applies per row as a safety net.
     """
     configs = cfg.get("afrispeech_configs")
     if configs:
         return list(configs)
+    dsid = cfg["hf_dataset_id"]
+    if dsid in _NG_CONFIG_CACHE:
+        return _NG_CONFIG_CACHE[dsid]
     try:
+        import eda
         from datasets import get_dataset_config_names
 
-        names = get_dataset_config_names(cfg["hf_dataset_id"], trust_remote_code=True)
-        return [n for n in names if n != "all"]
+        avail = set(get_dataset_config_names(dsid, trust_remote_code=True))
+        df = eda.load_ng_metadata(
+            dsid,
+            cache_dir=os.path.join(tempfile.gettempdir(), "afri_manifest"),
+            country=cfg.get("country_filter", "NG"),
+            macro_map=cfg.get("macro_accent_map", {}),
+        )
+        ng = sorted(a for a in eda.ng_accents(df) if a in avail)
+        if ng:
+            print(f"[curate] Nigerian accents to stream ({len(ng)}): {', '.join(ng)}")
+            _NG_CONFIG_CACHE[dsid] = ng
+            return ng
+        print("  [warn] no NG accents matched real configs; using cfg['accents']")
     except Exception as e:  # noqa: BLE001 — fall back to the thesis macro-accents
-        print(f"  [warn] could not list afrispeech configs ({e}); using cfg['accents']")
-        return list(cfg["accents"])
+        print(f"  [warn] could not derive NG configs ({e}); using cfg['accents']")
+    return list(cfg["accents"])
 
 
 def afrispeech_stream(cfg: dict, split: str, unit: str) -> Iterator[dict]:
