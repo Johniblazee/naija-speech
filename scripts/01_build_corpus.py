@@ -28,6 +28,8 @@ def main() -> None:
                     help="Stream a few rows per accent without a full download.")
     ap.add_argument("--push", action="store_true",
                     help="Push the curated corpus to the private HF dataset (hf_curated_repo).")
+    ap.add_argument("--resume", action="store_true",
+                    help="Resume a --push run: skip already-completed units instead of wiping.")
     args = ap.parse_args()
 
     load_dotenv()
@@ -47,7 +49,8 @@ def main() -> None:
         # Disk-safe: stream source -> unified schema -> upload Parquet shards to HF.
         from curate import curate_to_hub
 
-        curate_to_hub(cfg, cfg["hf_curated_repo"], limit=args.max_per_split)
+        curate_to_hub(cfg, cfg["hf_curated_repo"], limit=args.max_per_split,
+                      resume=args.resume)
         return
 
     # Local (disk) build — for small local tests only; use --push for Colab/HF.

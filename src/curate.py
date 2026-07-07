@@ -11,6 +11,7 @@ in `cfg["sources"]` into one corpus (shards tagged by source in the filename).
 """
 from __future__ import annotations
 
+import io
 import os
 import re
 import tempfile
@@ -61,49 +62,66 @@ def _macro_map(cfg):
 # --------------------------------------------------------------------------- #
 # Source adapters
 # --------------------------------------------------------------------------- #
-def afrispeech_stream(cfg: dict, split: str) -> Iterator[dict]:
-    """AfriSpeech-200 (read, utterance-level) Nigerian accents -> unified rows."""
+def afrispeech_units(cfg: dict, split: str) -> list[str]:
+    """Resumable units for AfriSpeech-200 = the HF configs we stream, one at a time.
+
+    - `afrispeech_configs` set in cfg  -> stream exactly those (e.g. [igbo, yoruba, hausa]
+      for a fast run, or [all] for one complete-but-not-resumable pass).
+    - unset (default)                  -> every per-accent config (excluding the aggregate
+      "all"), so each accent is its own checkpoint. Coverage == "all", but resumable.
+    """
+    configs = cfg.get("afrispeech_configs")
+    if configs:
+        return list(configs)
+    try:
+        from datasets import get_dataset_config_names
+
+        names = get_dataset_config_names(cfg["hf_dataset_id"], trust_remote_code=True)
+        return [n for n in names if n != "all"]
+    except Exception as e:  # noqa: BLE001 — fall back to the thesis macro-accents
+        print(f"  [warn] could not list afrispeech configs ({e}); using cfg['accents']")
+        return list(cfg["accents"])
+
+
+def afrispeech_stream(cfg: dict, split: str, unit: str) -> Iterator[dict]:
+    """Stream ONE AfriSpeech-200 config (`unit`) -> unified Nigerian rows."""
     from datasets import Audio, load_dataset
 
     macro_map = _macro_map(cfg)
     src_split = _AFRISPEECH_SPLIT[split]
-    # "all" (default) streams the whole corpus; country_filter keeps NG. The per-row
-    # accent below still comes from ex["accent"], so macro-mapping is unaffected.
-    configs = cfg.get("afrispeech_configs") or cfg["accents"]
-    for cfg_name in configs:
-        try:
-            ds = load_dataset(cfg["hf_dataset_id"], cfg_name, split=src_split,
-                              streaming=True, trust_remote_code=True)
-            ds = ds.cast_column("audio", Audio(decode=False))  # keep bytes, don't decode
-        except Exception as e:  # noqa: BLE001
-            print(f"  [warn] afrispeech-200 {cfg_name}/{src_split}: {e}")
+    try:
+        ds = load_dataset(cfg["hf_dataset_id"], unit, split=src_split,
+                          streaming=True, trust_remote_code=True)
+        ds = ds.cast_column("audio", Audio(decode=False))  # keep bytes, don't decode
+    except Exception as e:  # noqa: BLE001
+        print(f"  [warn] afrispeech-200 {unit}/{src_split}: {e}")
+        return
+    for ex in ds:
+        if cfg.get("country_filter") and ex.get("country") != cfg["country_filter"]:
             continue
-        for ex in ds:
-            if cfg.get("country_filter") and ex.get("country") != cfg["country_filter"]:
-                continue
-            raw = (ex.get("accent") or "").lower()
-            text_raw = ex.get("transcript") or ""
-            try:
-                dur = float(ex.get("duration"))
-            except (TypeError, ValueError):
-                dur = -1.0
-            yield {
-                "audio": ex["audio"],  # {"bytes": ..., "path": ...}
-                "text": normalize_text(text_raw, cfg.get("lowercase", True)),
-                "text_raw": text_raw,
-                "source": "afrispeech-200",
-                "language": "en",
-                "task": "stt",
-                "accent": raw,
-                "macro_accent": macro_accent(raw, macro_map),
-                "domain": ex.get("domain") or "unknown",
-                "speaker_id": str(ex.get("user_id") or ex.get("user_ids") or ""),
-                "gender": ex.get("gender") or "",
-                "age_group": ex.get("age_group") or "",
-                "duration": dur,
-                "quality": "unrated",
-                "license": "CC-BY-NC-SA-4.0",
-            }
+        raw = (ex.get("accent") or "").lower()
+        text_raw = ex.get("transcript") or ""
+        try:
+            dur = float(ex.get("duration"))
+        except (TypeError, ValueError):
+            dur = -1.0
+        yield {
+            "audio": ex["audio"],  # {"bytes": ..., "path": ...}
+            "text": normalize_text(text_raw, cfg.get("lowercase", True)),
+            "text_raw": text_raw,
+            "source": "afrispeech-200",
+            "language": "en",
+            "task": "stt",
+            "accent": raw,
+            "macro_accent": macro_accent(raw, macro_map),
+            "domain": ex.get("domain") or "unknown",
+            "speaker_id": str(ex.get("user_id") or ex.get("user_ids") or ""),
+            "gender": ex.get("gender") or "",
+            "age_group": ex.get("age_group") or "",
+            "duration": dur,
+            "quality": "unrated",
+            "license": "CC-BY-NC-SA-4.0",
+        }
 
 
 _TS_RE = re.compile(r"^\s*(\d{1,2}):(\d{2}):(\d{2})\s*$")
@@ -147,7 +165,12 @@ def parse_dialog_turns(transcript: str) -> list[tuple]:
     return turns
 
 
-def afrispeech_dialog_stream(cfg: dict, split: str) -> Iterator[dict]:
+def afrispeech_dialog_units(cfg: dict, split: str) -> list[str]:
+    """One resumable unit; only a `train` split exists upstream."""
+    return ["dialog"] if split == "train" else []
+
+
+def afrispeech_dialog_stream(cfg: dict, split: str, unit: str = "dialog") -> Iterator[dict]:
     """AfriSpeech-Dialog (spontaneous conversations) -> segmented unified rows.
 
     Conversations are long; we slice each into utterance turns via the timestamped
@@ -198,10 +221,12 @@ def afrispeech_dialog_stream(cfg: dict, split: str) -> Iterator[dict]:
             }
 
 
-# Register sources here. Add e.g. "common-voice": common_voice_stream later.
+# Register sources here as (units_fn, stream_fn). units_fn lists resumable checkpoint
+# units (streamed one at a time); stream_fn(cfg, split, unit) yields that unit's rows.
+# Add e.g. "common-voice": (common_voice_units, common_voice_stream) later.
 SOURCES = {
-    "afrispeech-200": afrispeech_stream,
-    "afrispeech-dialog": afrispeech_dialog_stream,
+    "afrispeech-200": (afrispeech_units, afrispeech_stream),
+    "afrispeech-dialog": (afrispeech_dialog_units, afrispeech_dialog_stream),
 }
 
 
@@ -214,6 +239,11 @@ def load_curated(repo: str, split: str | None = None):
 
     ds = load_dataset(repo, split=split)
     return ds.cast_column("audio", Audio(sampling_rate=16000))
+
+
+def _sanitize(name: str) -> str:
+    """Make a config/unit name safe for a shard filename."""
+    return re.sub(r"[^A-Za-z0-9]+", "-", str(name)).strip("-").lower() or "x"
 
 
 def _flush_shard(records, tag, idx, repo, api, features):
@@ -231,13 +261,32 @@ def _flush_shard(records, tag, idx, repo, api, features):
     print(f"  [curate] uploaded data/{tag}-{idx:05d}.parquet ({len(records)} rows)")
 
 
+def _mark_done(api, repo, key):
+    """Write a tiny checkpoint marker so --resume can skip this unit next time."""
+    api.upload_file(
+        path_or_fileobj=io.BytesIO(b"done"),
+        path_in_repo=key, repo_id=repo, repo_type="dataset",
+    )
+
+
 def curate_to_hub(cfg: dict, repo: str, shard_size: int = 500,
-                  limit: int | None = None, verify: bool = True) -> dict:
+                  limit: int | None = None, verify: bool = True,
+                  resume: bool = False) -> dict:
     """Stream every source in cfg['sources'] into ONE private HF dataset, disk-safe.
 
-    Shards are named `data/<split>-<source>-<idx>.parquet` so HF infers the split
-    and sources coexist in one corpus. `limit` caps rows per (split, source) for
-    a cheap smoke run.
+    Each source exposes resumable *units* (AfriSpeech-200 = one per accent config;
+    Dialog = one). A unit is streamed, sharded to
+    `data/<split>-<src>-<unit>-<idx>.parquet`, then a marker
+    `_checkpoints/<split>-<src>-<unit>.done` is written.
+
+    resume=False (default): wipe data/ + _checkpoints/ and start clean.
+    resume=True: keep what's there and skip units whose .done marker exists — so a run
+    killed by a network drop continues where it left off. Completed units are never
+    re-downloaded; a unit interrupted mid-stream is simply re-done from scratch.
+    `limit` caps rows per (split, source) for a cheap smoke run (no markers written).
+
+    Workflow: first run WITHOUT resume (clean start), then re-run WITH resume after
+    any interruption until it completes.
     """
     from datasets import load_dataset
     from huggingface_hub import HfApi, create_repo
@@ -246,34 +295,58 @@ def curate_to_hub(cfg: dict, repo: str, shard_size: int = 500,
     features = unified_features()
     api = HfApi()
     create_repo(repo, repo_type="dataset", private=True, exist_ok=True)
-    try:  # start clean so re-runs don't leave stale shards
-        api.delete_folder("data", repo_id=repo, repo_type="dataset")
-    except Exception:  # noqa: BLE001
-        pass
+
+    if not resume:  # clean start: drop stale shards AND stale checkpoints
+        for folder in ("data", "_checkpoints"):
+            try:
+                api.delete_folder(folder, repo_id=repo, repo_type="dataset")
+            except Exception:  # noqa: BLE001
+                pass
+
+    done = set()
+    if resume:
+        try:
+            done = {f for f in api.list_repo_files(repo, repo_type="dataset")
+                    if f.startswith("_checkpoints/") and f.endswith(".done")}
+        except Exception:  # noqa: BLE001
+            pass
 
     totals = {}
     for split in SPLITS:
         n_split = 0
         for src in sources:
-            stream_fn = SOURCES.get(src)
-            if stream_fn is None:
+            entry = SOURCES.get(src)
+            if entry is None:
                 print(f"  [warn] unknown source '{src}'")
                 continue
-            buf, idx, n = [], 0, 0
-            for rec in stream_fn(cfg, split):
-                buf.append(rec)
-                n += 1
-                if len(buf) >= shard_size:
-                    _flush_shard(buf, f"{split}-{src}", idx, repo, api, features)
-                    idx, buf = idx + 1, []
-                if limit and n >= limit:
+            units_fn, stream_fn = entry
+            n_src = 0
+            for unit in units_fn(cfg, split):
+                key = f"_checkpoints/{split}-{src}-{_sanitize(unit)}.done"
+                if key in done:
+                    print(f"  [resume] skip done: {split}/{src}/{unit}")
+                    continue
+                tag = f"{split}-{src}-{_sanitize(unit)}"
+                buf, idx, n = [], 0, 0
+                for rec in stream_fn(cfg, split, unit):
+                    buf.append(rec)
+                    n += 1
+                    if len(buf) >= shard_size:
+                        _flush_shard(buf, tag, idx, repo, api, features)
+                        idx, buf = idx + 1, []
+                    if limit and (n_src + n) >= limit:
+                        break
+                if buf:
+                    _flush_shard(buf, tag, idx, repo, api, features)
+                    idx += 1
+                if limit is None:  # only checkpoint real (uncapped) runs
+                    _mark_done(api, repo, key)
+                if n:
+                    print(f"[curate] {split}/{src}/{unit}: {n} clips in {idx} shard(s)")
+                n_src += n
+                if limit and n_src >= limit:
                     break
-            if buf:
-                _flush_shard(buf, f"{split}-{src}", idx, repo, api, features)
-                idx += 1
-            if n:
-                print(f"[curate] {split}/{src}: {n} clips in {idx} shard(s)")
-            n_split += n
+            n_split += n_src
         totals[split] = n_split
 
     print(f"[curate] done -> https://huggingface.co/datasets/{repo}")
