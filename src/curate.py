@@ -11,18 +11,19 @@ in `cfg["sources"]` into one corpus (shards tagged by source in the filename).
 """
 from __future__ import annotations
 
-import io
+import json
 import os
 import re
 import tempfile
+import time
 from typing import Iterator
 
 from corpus import macro_accent
 from text_normalization import normalize_text
 
 SPLITS = ("train", "validation", "test")
-# AfriSpeech-200's loading script names the dev split "dev".
-_AFRISPEECH_SPLIT = {"train": "train", "validation": "dev", "test": "test"}
+# AfriSpeech-200 configs name their splits train / validation / test (NOT "dev").
+_AFRISPEECH_SPLIT = {"train": "train", "validation": "validation", "test": "test"}
 _MAX_SEG_SEC = 30.0  # Whisper processes <= 30 s per clip
 
 # The one schema every source must produce. Training reads these names only.
@@ -246,50 +247,75 @@ def _sanitize(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "-", str(name)).strip("-").lower() or "x"
 
 
-def _flush_shard(records, tag, idx, repo, api, features):
+def _write_shard(records, tag, idx, features):
+    """Write one shard to a local temp parquet; return (path_in_repo, local_path, bytes)."""
     from datasets import Dataset
 
     ds = Dataset.from_list(records, features=features)
     path = os.path.join(tempfile.gettempdir(), f"{tag}-{idx:05d}.parquet")
     ds.to_parquet(path)
-    api.upload_file(
-        path_or_fileobj=path,
-        path_in_repo=f"data/{tag}-{idx:05d}.parquet",
-        repo_id=repo, repo_type="dataset",
-    )
-    os.remove(path)
-    print(f"  [curate] uploaded data/{tag}-{idx:05d}.parquet ({len(records)} rows)")
+    return f"data/{tag}-{idx:05d}.parquet", path, os.path.getsize(path)
 
 
-def _mark_done(api, repo, key):
-    """Write a tiny checkpoint marker so --resume can skip this unit next time."""
-    api.upload_file(
-        path_or_fileobj=io.BytesIO(b"done"),
-        path_in_repo=key, repo_id=repo, repo_type="dataset",
-    )
+def _retry_after_seconds(err, default=60):
+    """Seconds to wait after a 429, from the Retry-After header or the message text."""
+    resp = getattr(err, "response", None)
+    if resp is not None:
+        ra = resp.headers.get("Retry-After")
+        if ra and str(ra).isdigit():
+            return int(ra) + 1
+    m = re.search(r"[Rr]etry after (\d+)", str(err))
+    return int(m.group(1)) + 1 if m else default
+
+
+def _commit(api, repo, ops, message, max_retries=6):
+    """Commit many files in ONE request; retry on 429 honouring Retry-After.
+
+    Batching files into few commits is what keeps us under HF's 128-commits/hour cap;
+    the backoff is the safety net if a burst still trips it.
+    """
+    from huggingface_hub.utils import HfHubHTTPError
+
+    for attempt in range(max_retries):
+        try:
+            api.create_commit(repo_id=repo, repo_type="dataset",
+                              operations=ops, commit_message=message)
+            return
+        except HfHubHTTPError as e:
+            code = getattr(getattr(e, "response", None), "status_code", None)
+            if code == 429 and attempt < max_retries - 1:
+                wait = _retry_after_seconds(e)
+                print(f"  [rate-limit] 429 — sleeping {wait}s then retrying (attempt {attempt + 1})")
+                time.sleep(wait)
+                continue
+            raise
 
 
 def curate_to_hub(cfg: dict, repo: str, shard_size: int = 500,
                   limit: int | None = None, verify: bool = True,
-                  resume: bool = False) -> dict:
+                  resume: bool = False, batch_bytes: int = 700_000_000,
+                  batch_units: int = 15) -> dict:
     """Stream every source in cfg['sources'] into ONE private HF dataset, disk-safe.
 
     Each source exposes resumable *units* (AfriSpeech-200 = one per accent config;
-    Dialog = one). A unit is streamed, sharded to
-    `data/<split>-<src>-<unit>-<idx>.parquet`, then a marker
-    `_checkpoints/<split>-<src>-<unit>.done` is written.
+    Dialog = one). Units are streamed and sharded to
+    `data/<split>-<src>-<unit>-<idx>.parquet`; progress is recorded in
+    `_checkpoints/progress.json`.
+
+    Uploads are BATCHED: shards accumulate locally until ~`batch_bytes` of data (or
+    `batch_units` finished units), then go up in ONE commit — this keeps us well under
+    HF's 128-commits/hour cap (the old commit-per-file approach 429'd). `_commit` also
+    backs off on 429.
 
     resume=False (default): wipe data/ + _checkpoints/ and start clean.
-    resume=True: keep what's there and skip units whose .done marker exists — so a run
-    killed by a network drop continues where it left off. Completed units are never
-    re-downloaded; a unit interrupted mid-stream is simply re-done from scratch.
-    `limit` caps rows per (split, source) for a cheap smoke run (no markers written).
+    resume=True: read progress.json and skip units already recorded there.
+    `limit` caps rows per (split, source) for a cheap smoke run (progress not recorded).
 
-    Workflow: first run WITHOUT resume (clean start), then re-run WITH resume after
-    any interruption until it completes.
+    Workflow: first run WITHOUT resume (clean start), then re-run WITH resume after any
+    interruption until it completes.
     """
     from datasets import load_dataset
-    from huggingface_hub import HfApi, create_repo
+    from huggingface_hub import CommitOperationAdd, HfApi, create_repo, hf_hub_download
 
     sources = cfg.get("sources") or [cfg.get("source")]
     features = unified_features()
@@ -303,13 +329,45 @@ def curate_to_hub(cfg: dict, repo: str, shard_size: int = 500,
             except Exception:  # noqa: BLE001
                 pass
 
-    done = set()
+    done = set()  # unit keys already committed to progress.json
     if resume:
         try:
-            done = {f for f in api.list_repo_files(repo, repo_type="dataset")
-                    if f.startswith("_checkpoints/") and f.endswith(".done")}
+            p = hf_hub_download(repo, "_checkpoints/progress.json",
+                                repo_type="dataset", force_download=True)
+            with open(p, encoding="utf-8") as f:
+                done = set(json.load(f))
+            print(f"[curate] resume: {len(done)} units already done")
         except Exception:  # noqa: BLE001
             pass
+
+    ops, tmp_paths, pending_units = [], [], []
+    staged_bytes = 0
+
+    def flush(message):
+        nonlocal staged_bytes
+        if not ops and not pending_units:
+            return
+        ops.append(CommitOperationAdd(
+            path_in_repo="_checkpoints/progress.json",
+            path_or_fileobj=(json.dumps(sorted(done)) + "\n").encode("utf-8"),
+        ))
+        _commit(api, repo, ops, message)
+        for pth in tmp_paths:
+            try:
+                os.remove(pth)
+            except OSError:
+                pass
+        print(f"  [curate] committed {len(ops)} file(s); {len(done)} units done")
+        ops.clear(); tmp_paths.clear(); pending_units.clear(); staged_bytes = 0
+
+    def stage(records, tag, idx):
+        nonlocal staged_bytes
+        path_in_repo, path, size = _write_shard(records, tag, idx, features)
+        ops.append(CommitOperationAdd(path_in_repo=path_in_repo, path_or_fileobj=path))
+        tmp_paths.append(path)
+        staged_bytes += size
+        if staged_bytes >= batch_bytes:
+            flush(f"curate: {len(ops)} shard(s)")
 
     totals = {}
     for split in SPLITS:
@@ -322,33 +380,36 @@ def curate_to_hub(cfg: dict, repo: str, shard_size: int = 500,
             units_fn, stream_fn = entry
             n_src = 0
             for unit in units_fn(cfg, split):
-                key = f"_checkpoints/{split}-{src}-{_sanitize(unit)}.done"
+                key = f"{split}-{src}-{_sanitize(unit)}"
                 if key in done:
                     print(f"  [resume] skip done: {split}/{src}/{unit}")
                     continue
-                tag = f"{split}-{src}-{_sanitize(unit)}"
                 buf, idx, n = [], 0, 0
                 for rec in stream_fn(cfg, split, unit):
                     buf.append(rec)
                     n += 1
                     if len(buf) >= shard_size:
-                        _flush_shard(buf, tag, idx, repo, api, features)
+                        stage(buf, key, idx)
                         idx, buf = idx + 1, []
                     if limit and (n_src + n) >= limit:
                         break
                 if buf:
-                    _flush_shard(buf, tag, idx, repo, api, features)
+                    stage(buf, key, idx)
                     idx += 1
-                if limit is None:  # only checkpoint real (uncapped) runs
-                    _mark_done(api, repo, key)
+                if limit is None:  # record unit done (committed on the next flush)
+                    done.add(key)
+                    pending_units.append(key)
                 if n:
                     print(f"[curate] {split}/{src}/{unit}: {n} clips in {idx} shard(s)")
                 n_src += n
+                if len(pending_units) >= batch_units:
+                    flush(f"curate: {len(pending_units)} unit(s)")
                 if limit and n_src >= limit:
                     break
             n_split += n_src
         totals[split] = n_split
 
+    flush("curate: final batch")
     print(f"[curate] done -> https://huggingface.co/datasets/{repo}")
     if verify and any(totals.values()):
         first = next(s for s in SPLITS if totals.get(s))
