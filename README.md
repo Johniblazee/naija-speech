@@ -31,6 +31,7 @@ strategy described in the thesis methodology.
 | 2 | `scripts/02_zeroshot_baseline.py` | Measure the **gap**: zero-shot Whisper WER/CER on the Nigerian test set, stratified by accent and domain. |
 | 3 | `scripts/03_finetune_whisper_lora.py` | LoRA fine-tune Whisper; log to W&B. |
 | 4 | `scripts/04_evaluate.py` | Evaluate the fine-tuned model; produce the accuracy + fairness tables for Chapter 5. |
+| 5 | `scripts/05_verify_corpus.py` | Audit the curated corpus (metadata only): clips/hours per source/accent, speaker-disjoint check. |
 
 ## Setup
 
