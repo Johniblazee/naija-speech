@@ -45,10 +45,17 @@ On Google Colab / RunPod, run the same `pip install` and set the env vars in the
 
 ## Compute strategy (matches the thesis)
 
-- **Develop small, then scale.** Start with `whisper-small` on a free Colab T4 to validate the
-  whole pipeline cheaply, then rerun with `whisper-large-v3` on a rented A100. Switch by
-  editing one line in `configs/stt_whisper_small_lora.yaml` (`model_id`).
+- **Unsloth 4-bit → a large model on free hardware.** The headline STT run fine-tunes
+  `whisper-large-v3-turbo` (809M) with LoRA via [Unsloth](https://github.com/unslothai/unsloth)
+  in 4-bit, which fits a **free Colab T4** — no A100 rental. Config:
+  `configs/stt_whisper_large_v3_turbo_unsloth.yaml`; run step 3 with `--backend unsloth`.
+  The Colab driver is `notebooks/02_stt_slice.ipynb`.
+- **Two backends, one pipeline.** `--backend hf` (vanilla HF+PEFT, CPU-importable) or
+  `--backend unsloth` (~2x faster). Everything downstream — data prep, collator, metrics,
+  eval — is identical, so results are comparable.
 - **PEFT by default.** LoRA trains ~1–5% of parameters, so even `large-v3` fits a single GPU.
+- **Fallback to rent.** For full `whisper-large-v3` (1.55B) at scale, the same config swap +
+  a rented A100 still works — but the turbo run above usually makes it unnecessary.
 
 ## Tracking
 

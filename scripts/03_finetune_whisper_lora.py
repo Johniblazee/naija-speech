@@ -1,11 +1,19 @@
 """Step 3 — LoRA fine-tune Whisper on the Nigerian corpus.
 
-Trains LoRA adapters (parameter-efficient: ~1-5% of weights) and logs to Comet.
+Trains LoRA adapters (parameter-efficient: ~1-5% of weights) and logs to W&B.
 Saves the adapter + processor to the config's output_dir.
 
+Two model-build backends (the rest of the pipeline is identical either way):
+  --backend hf       vanilla HuggingFace + PEFT (default; CPU-importable, robust)
+  --backend unsloth  Unsloth FastModel — ~2x faster, and in 4-bit fits
+                     whisper-large-v3(-turbo) on a *free* Colab T4.
+
 Usage:
-    python scripts/03_finetune_whisper_lora.py --max-steps 50    # smoke run
-    python scripts/03_finetune_whisper_lora.py                   # full run (uses epochs)
+    python scripts/03_finetune_whisper_lora.py --max-steps 50            # smoke run
+    python scripts/03_finetune_whisper_lora.py \
+        --model-config configs/stt_whisper_large_v3_turbo_unsloth.yaml \
+        --backend unsloth                                                # headline run
+    python scripts/03_finetune_whisper_lora.py ... --backend unsloth --resume  # after a Colab disconnect
 """
 from __future__ import annotations
 
@@ -30,8 +38,14 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="LoRA fine-tune Whisper for Nigerian English.")
     ap.add_argument("--data-config", default="configs/data_afrispeech_ng.yaml")
     ap.add_argument("--model-config", default="configs/stt_whisper_small_lora.yaml")
+    ap.add_argument("--backend", choices=["hf", "unsloth"], default="hf",
+                    help="Model-build backend. 'unsloth' = 2x faster + 4-bit large models on a T4.")
     ap.add_argument("--max-steps", type=int, default=None,
                     help="Override max_steps for a quick smoke run.")
+    ap.add_argument("--max-train", type=int, default=None,
+                    help="Cap the number of training clips (fast subset run).")
+    ap.add_argument("--resume", action="store_true",
+                    help="Resume from the latest checkpoint in output_dir (survive Colab disconnects).")
     args = ap.parse_args()
 
     load_dotenv()
@@ -39,25 +53,43 @@ def main() -> None:
     cfg = load_yaml(args.model_config)
     if args.max_steps is not None:
         cfg["max_steps"] = args.max_steps
+    if args.max_train is not None:
+        cfg["max_train"] = args.max_train
 
     # W&B auto-logging via the Trainer reads WANDB_* env vars.
     use_wandb = bool(os.environ.get("WANDB_API_KEY"))
 
     from curate import load_curated
+
+    # IMPORTANT: import unsloth BEFORE transformers so its kernels/patches apply.
+    if args.backend == "unsloth":
+        from whisper_unsloth import build_unsloth
+        model, processor = build_unsloth(cfg)     # already LoRA-wrapped
+    else:
+        processor = build_processor(cfg)
+        model = apply_lora(load_model(cfg), cfg)
+
     from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments
 
-    processor = build_processor(cfg)
     dsd = load_curated(data_cfg["hf_curated_repo"])
-
     prepare = make_prepare_fn(processor)
-    train_ds = dsd["train"].map(prepare, remove_columns=dsd["train"].column_names,
-                                desc="prepare train")
-    eval_split = "validation" if "validation" in dsd else "test"
-    eval_ds = dsd[eval_split].map(prepare, remove_columns=dsd[eval_split].column_names,
-                                  desc="prepare eval")
 
-    model = load_model(cfg)
-    model = apply_lora(model, cfg)
+    train_ds = dsd["train"]
+    if cfg.get("max_train"):
+        train_ds = train_ds.select(range(min(cfg["max_train"], train_ds.num_rows)))
+    train_ds = train_ds.map(prepare, remove_columns=train_ds.column_names,
+                            desc="prepare train")
+
+    # In-training generation eval is heavy for a large model on a T4; the turbo
+    # config disables it (eval_strategy: "no") and 04_evaluate.py produces the
+    # authoritative stratified WER on the full test split instead.
+    do_eval = cfg["eval_strategy"] != "no"
+    eval_ds = None
+    if do_eval:
+        eval_split = "validation" if "validation" in dsd else "test"
+        eval_ds = dsd[eval_split].map(prepare, remove_columns=dsd[eval_split].column_names,
+                                      desc="prepare eval")
+
     # Free generation of language/task during eval.
     model.generation_config.language = cfg["language"]
     model.generation_config.task = cfg["task"]
@@ -75,9 +107,11 @@ def main() -> None:
         num_train_epochs=cfg["num_train_epochs"],
         max_steps=cfg["max_steps"],
         fp16=cfg["fp16"],
+        optim=cfg.get("optim", "adamw_torch"),
         eval_strategy=cfg["eval_strategy"],
         eval_steps=cfg["eval_steps"],
         save_steps=cfg["save_steps"],
+        save_total_limit=cfg.get("save_total_limit", 2),  # cap Colab disk
         logging_steps=cfg["logging_steps"],
         predict_with_generate=True,
         generation_max_length=cfg["generation_max_length"],
@@ -94,12 +128,12 @@ def main() -> None:
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         data_collator=collator,
-        compute_metrics=make_compute_metrics(processor),
+        compute_metrics=make_compute_metrics(processor) if do_eval else None,
         tokenizer=processor.feature_extractor,
     )
     model.config.use_cache = False  # silence warning; required during training
 
-    trainer.train()
+    trainer.train(resume_from_checkpoint=args.resume or None)
 
     adapter_dir = os.path.join(cfg["output_dir"], "adapter")
     model.save_pretrained(adapter_dir)

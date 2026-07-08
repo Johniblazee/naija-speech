@@ -1,0 +1,51 @@
+# Headline STT fine-tune: Whisper large-v3-turbo + LoRA, via Unsloth in 4-bit.
+#
+# In 4-bit, Unsloth fits this 809M-param model on a FREE Colab T4 — no A100 rental.
+# Run with:  python scripts/03_finetune_whisper_lora.py \
+#              --model-config configs/stt_whisper_large_v3_turbo_unsloth.yaml \
+#              --backend unsloth
+#
+# The zero-shot baseline (02) and evaluation (04) load this same model_id in fp16
+# (fits a T4 for inference) so the before/after comparison is apples-to-apples.
+
+model_id: openai/whisper-large-v3-turbo   # canonical weights; Unsloth 4-bit-quantizes on the fly
+language: english
+task: transcribe
+
+load_in_4bit: true                 # Unsloth 4-bit → large model fits a free T4
+load_in_8bit: false
+
+# LoRA (parameter-efficient fine-tuning)
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.0                     # Unsloth is optimized for dropout = 0
+  target_modules: [q_proj, v_proj]
+
+# Training
+output_dir: outputs/whisper_turbo_unsloth
+# ponytail: T4-safe batch. Whisper mel features are a fixed 30 s, so memory is
+# per-clip heavy. If you hit CUDA OOM, drop batch to 2 (or 1) and raise
+# gradient_accumulation_steps to keep the effective batch ~16.
+per_device_train_batch_size: 4
+per_device_eval_batch_size: 4
+gradient_accumulation_steps: 4     # effective batch = 16
+learning_rate: 0.0001              # 1e-4: Unsloth's Whisper-LoRA default
+warmup_steps: 50
+num_train_epochs: 1                # ~2.5k steps over the 40.7k-clip train split
+max_steps: -1                      # -1 = use epochs; set positive for a step-budget run
+optim: adamw_8bit                  # 8-bit Adam (bitsandbytes, shipped with Unsloth)
+fp16: true                         # T4 has no bf16; on A100 this still runs (just not optimal)
+
+# In-training eval OFF — generation eval of a large model on a T4 risks OOM and is
+# slow. 04_evaluate.py gives the real stratified WER on the full test split.
+eval_strategy: "no"
+eval_steps: 500
+save_steps: 250                    # checkpoint for --resume across Colab disconnects
+save_total_limit: 1                # keep only the latest checkpoint (Colab disk)
+logging_steps: 25
+generation_max_length: 225
+seed: 42
+
+# Evaluation output
+results_dir: outputs/whisper_turbo_unsloth/results
