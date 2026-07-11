@@ -13,6 +13,18 @@ fine-tune models with parameter-efficient methods (LoRA), and evaluate them on t
 > (Whisper) fine-tuned with LoRA on the Nigerian subset of AfriSpeech-200, evaluated against
 > its zero-shot baseline. TTS comes after the STT slice works end-to-end.
 
+## TTS roster (locked 2026-07-11; code lands at TTS kickoff)
+
+- **Fine-tuned (3):** StyleTTS 2 (primary, style-diffusion, MIT) → Orpheus-3B (codec-LM,
+  Apache-2.0, Unsloth 4-bit QLoRA — same toolchain as the STT slice) → F5-TTS (flow-matching
+  DiT, stretch; MIT code / CC-BY-NC weights).
+- **Zero-shot baselines (3):** YarnGPT (Nigerian domain baseline), Qwen3-TTS, XTTS-v2
+  (demoted from fine-tune slot: CPML non-commercial).
+
+Compute tiers: free Colab T4 for dev + 4-bit QLoRA runs → RunPod Community A5000 24GB
+(~$0.27/hr) / A40 48GB (~$0.44/hr) for most fine-tunes → A100-80 (~$1.40–1.65/hr RunPod, or
+HF Jobs per-minute) for final citable runs only.
+
 ---
 
 ## Why "vertical slice" first
