@@ -34,7 +34,9 @@ warmup_steps: 50
 num_train_epochs: 1                # ~2.5k steps over the 40.7k-clip train split
 max_steps: -1
 optim: adamw_torch                 # no bitsandbytes dependency
-fp16: true
+fp16: false
+bf16: true                         # A40/Ampere: fp32's range at half size -> no GradScaler,
+                                   # no overflow-skipped steps. (T4 can't bf16 -> use fp16.)
 
 # In-training eval OFF — 04_evaluate.py produces the authoritative stratified WER.
 eval_strategy: "no"

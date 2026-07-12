@@ -125,7 +125,8 @@ def main() -> None:
         warmup_steps=cfg["warmup_steps"],
         num_train_epochs=cfg["num_train_epochs"],
         max_steps=cfg["max_steps"],
-        fp16=cfg["fp16"],
+        fp16=cfg.get("fp16", False),
+        bf16=cfg.get("bf16", False),   # Ampere+ GPUs (A40/A100); no GradScaler overflow steps
         optim=cfg.get("optim", "adamw_torch"),
         eval_strategy="steps" if do_eval else "no",
         eval_steps=cfg["eval_steps"],
