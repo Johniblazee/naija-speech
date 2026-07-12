@@ -91,3 +91,22 @@ def compute_stratified(
             results.append({"group": gk, "key": key, **m})
 
     return results
+
+
+def write_hypotheses_csv(rows: list[dict], path: str) -> None:
+    """Persist the per-clip (reference, hypothesis, accent, domain) pairs.
+
+    Cheap to write, expensive to regenerate (hours of GPU decoding). These pairs
+    are what any later error analysis consumes — the aggregate results CSV alone
+    cannot support it. `idx` is the row index within the evaluated split, the
+    join key between zero-shot and fine-tuned runs (same split + same --limit).
+    """
+    import csv
+    import os
+
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["idx", "reference", "hypothesis",
+                                          "macro_accent", "domain"])
+        w.writeheader()
+        w.writerows([{"idx": i, **r} for i, r in enumerate(rows)])

@@ -44,6 +44,8 @@ def main() -> None:
                     help="Override max_steps for a quick smoke run.")
     ap.add_argument("--max-train", type=int, default=None,
                     help="Cap the number of training clips (fast subset run).")
+    ap.add_argument("--save-steps", type=int, default=None,
+                    help="Override checkpoint frequency (e.g. 50 for a checkpointed smoke run).")
     ap.add_argument("--resume", action="store_true",
                     help="Resume from the latest checkpoint in output_dir (survive Colab disconnects).")
     args = ap.parse_args()
@@ -55,6 +57,8 @@ def main() -> None:
         cfg["max_steps"] = args.max_steps
     if args.max_train is not None:
         cfg["max_train"] = args.max_train
+    if args.save_steps is not None:
+        cfg["save_steps"] = args.save_steps
 
     # W&B auto-logging via the Trainer reads WANDB_* env vars.
     use_wandb = bool(os.environ.get("WANDB_API_KEY"))
@@ -71,10 +75,14 @@ def main() -> None:
 
     from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments
 
-    dsd = load_curated(data_cfg["hf_curated_repo"])
     prepare = make_prepare_fn(processor)
 
-    train_ds = dsd["train"]
+    # Load ONLY the split(s) we need. load_curated(repo) with no split pulls the
+    # entire ~70 GB corpus (all splits) before training starts — that is what
+    # silently stalled/filled the disk on free Colab. Train split alone is the
+    # bulk of it, but the download is cached and reused by later runs.
+    print("[data] loading 'train' split (first run downloads it; cached afterwards)")
+    train_ds = load_curated(data_cfg["hf_curated_repo"], split="train")
     if cfg.get("max_train"):
         train_ds = train_ds.select(range(min(cfg["max_train"], train_ds.num_rows)))
     train_ds = train_ds.map(prepare, remove_columns=train_ds.column_names,
@@ -86,9 +94,9 @@ def main() -> None:
     do_eval = cfg["eval_strategy"] != "no"
     eval_ds = None
     if do_eval:
-        eval_split = "validation" if "validation" in dsd else "test"
-        eval_ds = dsd[eval_split].map(prepare, remove_columns=dsd[eval_split].column_names,
-                                      desc="prepare eval")
+        eval_ds = load_curated(data_cfg["hf_curated_repo"], split="validation")
+        eval_ds = eval_ds.map(prepare, remove_columns=eval_ds.column_names,
+                              desc="prepare eval")
 
     # Free generation of language/task during eval.
     model.generation_config.language = cfg["language"]

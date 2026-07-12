@@ -18,7 +18,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from config import load_dotenv, load_yaml  # noqa: E402
-from metrics import compute_stratified  # noqa: E402
+from metrics import compute_stratified, write_hypotheses_csv  # noqa: E402
 from tracking import maybe_log_wandb  # noqa: E402
 from whisper_lora import build_processor, transcribe_dataset  # noqa: E402
 
@@ -86,7 +86,9 @@ def main() -> None:
 
     print_table(results)
     write_results_csv(results, args.out)
-    print(f"\nWrote results to {args.out}")
+    hyp_path = os.path.join(os.path.dirname(args.out) or ".", "hypotheses.csv")
+    write_hypotheses_csv(rows, hyp_path)
+    print(f"\nWrote results to {args.out}\nWrote per-clip pairs to {hyp_path}")
 
     maybe_log_wandb(
         results,
