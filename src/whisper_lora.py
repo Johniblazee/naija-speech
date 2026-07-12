@@ -135,6 +135,9 @@ def transcribe_dataset(
     # transformers v5 loads checkpoints in native precision (fp16 for turbo);
     # features come out float32 — cast them to the model's dtype or conv1 crashes.
     model_dtype = next(model.parameters()).dtype
+    # Our max_new_tokens is the only length cap we want; drop the factory
+    # max_length=448 so transformers stops warning once per batch.
+    model.generation_config.max_length = None
 
     hyps: list[str] = []
     for start in range(0, ds.num_rows, batch_size):

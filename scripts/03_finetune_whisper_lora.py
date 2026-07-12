@@ -46,6 +46,11 @@ def main() -> None:
                     help="Cap the number of training clips (fast subset run).")
     ap.add_argument("--save-steps", type=int, default=None,
                     help="Override checkpoint frequency (e.g. 50 for a checkpointed smoke run).")
+    ap.add_argument("--eval-loss", type=int, default=None, metavar="N",
+                    help="Cheap loss-only eval on the first N validation clips (forward pass "
+                         "only, no generation/WER — the real WER stays in 04_evaluate.py).")
+    ap.add_argument("--eval-steps", type=int, default=None,
+                    help="Override eval cadence (pairs with --eval-loss).")
     ap.add_argument("--resume", action="store_true",
                     help="Resume from the latest checkpoint in output_dir (survive Colab disconnects).")
     args = ap.parse_args()
@@ -59,6 +64,8 @@ def main() -> None:
         cfg["max_train"] = args.max_train
     if args.save_steps is not None:
         cfg["save_steps"] = args.save_steps
+    if args.eval_steps is not None:
+        cfg["eval_steps"] = args.eval_steps
 
     # W&B auto-logging via the Trainer reads WANDB_* env vars.
     use_wandb = bool(os.environ.get("WANDB_API_KEY"))
@@ -88,13 +95,17 @@ def main() -> None:
     train_ds = train_ds.map(prepare, remove_columns=train_ds.column_names,
                             desc="prepare train")
 
-    # In-training generation eval is heavy for a large model on a T4; the turbo
-    # config disables it (eval_strategy: "no") and 04_evaluate.py produces the
-    # authoritative stratified WER on the full test split instead.
-    do_eval = cfg["eval_strategy"] != "no"
+    # Two in-training eval modes (04_evaluate.py stays the authoritative WER):
+    #  - wer_eval: config-driven full generation eval (WER; slow — small models only)
+    #  - --eval-loss N: loss-only eval on N validation clips (forward pass, ~seconds;
+    #    a live overfitting signal that costs almost nothing on the training clock)
+    wer_eval = cfg["eval_strategy"] != "no"
+    do_eval = wer_eval or args.eval_loss is not None
     eval_ds = None
     if do_eval:
         eval_ds = load_curated(data_cfg["hf_curated_repo"], split="validation")
+        if not wer_eval:
+            eval_ds = eval_ds.select(range(min(args.eval_loss, eval_ds.num_rows)))
         eval_ds = eval_ds.map(prepare, remove_columns=eval_ds.column_names,
                               desc="prepare eval")
 
@@ -116,12 +127,12 @@ def main() -> None:
         max_steps=cfg["max_steps"],
         fp16=cfg["fp16"],
         optim=cfg.get("optim", "adamw_torch"),
-        eval_strategy=cfg["eval_strategy"],
+        eval_strategy="steps" if do_eval else "no",
         eval_steps=cfg["eval_steps"],
         save_steps=cfg["save_steps"],
         save_total_limit=cfg.get("save_total_limit", 2),  # cap Colab disk
         logging_steps=cfg["logging_steps"],
-        predict_with_generate=True,
+        predict_with_generate=wer_eval,   # generation only in full-WER eval mode
         generation_max_length=cfg["generation_max_length"],
         report_to=["wandb"] if use_wandb else ["none"],
         remove_unused_columns=False,   # required: our collator reads custom columns
@@ -136,7 +147,7 @@ def main() -> None:
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         data_collator=collator,
-        compute_metrics=make_compute_metrics(processor) if do_eval else None,
+        compute_metrics=make_compute_metrics(processor) if wer_eval else None,
         processing_class=processor.feature_extractor,  # transformers v5 renamed `tokenizer`
     )
     model.config.use_cache = False  # silence warning; required during training
