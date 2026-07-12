@@ -1,0 +1,49 @@
+# Headline STT fine-tune on a RENTED GPU (RunPod A40 48GB+): Whisper large-v3-turbo
+# + LoRA via the plain HF+PEFT backend (--backend hf). No Unsloth, no bitsandbytes,
+# no 4-bit — quantization was only ever needed to fit a free 16GB T4.
+#
+# Run with:  python scripts/03_finetune_whisper_lora.py \
+#              --model-config configs/stt_whisper_large_v3_turbo_hf.yaml \
+#              --backend hf
+#
+# IMPORTANT on RunPod: set HF_HOME=/workspace/hf BEFORE running anything, or the
+# ~70GB corpus lands on the 20GB container disk. Expected peak disk ~180GB.
+
+model_id: openai/whisper-large-v3-turbo
+language: english
+task: transcribe
+
+load_in_4bit: false
+load_in_8bit: false
+
+# LoRA (parameter-efficient fine-tuning) — identical adapter shape to the
+# unsloth config so results stay comparable.
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.05
+  target_modules: [q_proj, v_proj]
+
+# Training — sized for 48GB VRAM (drop batch to 8 + accum 2 if OOM).
+output_dir: outputs/whisper_turbo_hf
+per_device_train_batch_size: 16
+per_device_eval_batch_size: 16
+gradient_accumulation_steps: 1     # effective batch = 16 (same as unsloth config)
+learning_rate: 0.0001
+warmup_steps: 50
+num_train_epochs: 1                # ~2.5k steps over the 40.7k-clip train split
+max_steps: -1
+optim: adamw_torch                 # no bitsandbytes dependency
+fp16: true
+
+# In-training eval OFF — 04_evaluate.py produces the authoritative stratified WER.
+eval_strategy: "no"
+eval_steps: 500
+save_steps: 250                    # checkpoint for --resume; smoke: --save-steps 50
+save_total_limit: 1
+logging_steps: 25
+generation_max_length: 225
+seed: 42
+
+# Evaluation output
+results_dir: outputs/whisper_turbo_hf/results

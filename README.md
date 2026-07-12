@@ -65,6 +65,11 @@ On Google Colab / RunPod, run the same `pip install` and set the env vars in the
 - **Two backends, one pipeline.** `--backend hf` (vanilla HF+PEFT, CPU-importable) or
   `--backend unsloth` (~2x faster). Everything downstream — data prep, collator, metrics,
   eval — is identical, so results are comparable.
+- **Rented GPU (RunPod A40+)?** Use `--backend hf` with
+  `configs/stt_whisper_large_v3_turbo_hf.yaml` — no Unsloth/bitsandbytes needed at 48 GB
+  (Unsloth's current Whisper patcher also has a pad-token bug). And set
+  `HF_HOME=/workspace/hf` FIRST or the ~70 GB corpus lands on the small container disk;
+  expect ~180 GB peak on the volume (parquet + Arrow copy + feature cache).
 - **PEFT by default.** LoRA trains ~1–5% of parameters, so even `large-v3` fits a single GPU.
 - **Fallback to rent.** For full `whisper-large-v3` (1.55B) at scale, the same config swap +
   a rented A100 still works — but the turbo run above usually makes it unnecessary.
