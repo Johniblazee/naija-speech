@@ -1,6 +1,6 @@
 # Core ML
 torch>=2.1
-transformers>=4.44
+transformers>=4.46    # >=4.46 for Trainer(processing_class=...); works on v5
 datasets>=2.20,<4.0   # AfriSpeech-200 uses a loading script (removed in datasets 4.x)
 accelerate>=0.33
 peft>=0.12

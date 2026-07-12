@@ -132,7 +132,6 @@ def transcribe_dataset(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device).eval()
-    forced_decoder_ids = processor.get_decoder_prompt_ids(language=language, task=task)
 
     hyps: list[str] = []
     for start in range(0, ds.num_rows, batch_size):
@@ -143,9 +142,12 @@ def transcribe_dataset(
             arrays, sampling_rate=sr, return_tensors="pt"
         ).input_features.to(device)
         with torch.no_grad():
+            # language/task kwargs are the current Whisper API; the old
+            # forced_decoder_ids path was removed in transformers v5.
             generated = model.generate(
                 input_features=features,
-                forced_decoder_ids=forced_decoder_ids,
+                language=language,
+                task=task,
                 max_new_tokens=max_new_tokens,
             )
         hyps.extend(processor.batch_decode(generated, skip_special_tokens=True))

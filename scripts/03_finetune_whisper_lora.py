@@ -137,7 +137,7 @@ def main() -> None:
         eval_dataset=eval_ds,
         data_collator=collator,
         compute_metrics=make_compute_metrics(processor) if do_eval else None,
-        tokenizer=processor.feature_extractor,
+        processing_class=processor.feature_extractor,  # transformers v5 renamed `tokenizer`
     )
     model.config.use_cache = False  # silence warning; required during training
 
