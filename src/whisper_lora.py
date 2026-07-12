@@ -132,6 +132,9 @@ def transcribe_dataset(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device).eval()
+    # transformers v5 loads checkpoints in native precision (fp16 for turbo);
+    # features come out float32 — cast them to the model's dtype or conv1 crashes.
+    model_dtype = next(model.parameters()).dtype
 
     hyps: list[str] = []
     for start in range(0, ds.num_rows, batch_size):
@@ -140,7 +143,7 @@ def transcribe_dataset(
         sr = batch["audio"][0]["sampling_rate"]
         features = processor.feature_extractor(
             arrays, sampling_rate=sr, return_tensors="pt"
-        ).input_features.to(device)
+        ).input_features.to(device=device, dtype=model_dtype)
         with torch.no_grad():
             # language/task kwargs are the current Whisper API; the old
             # forced_decoder_ids path was removed in transformers v5.
