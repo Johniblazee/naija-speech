@@ -24,8 +24,8 @@ _WHISPER_LANG = {"english": "English"}
 
 def build_unsloth(cfg: dict[str, Any]):
     """FastModel.from_pretrained + get_peft_model -> (model, processor), LoRA-ready."""
+    from unsloth import FastModel  # MUST precede transformers so Unsloth's patches apply
     from transformers import WhisperForConditionalGeneration
-    from unsloth import FastModel
 
     lang = _WHISPER_LANG.get(str(cfg["language"]).lower(), cfg["language"])
 
