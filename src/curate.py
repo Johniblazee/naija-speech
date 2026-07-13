@@ -262,6 +262,22 @@ def load_curated(repo: str, split: str | None = None):
     return ds.cast_column("audio", Audio(sampling_rate=16000))
 
 
+def filter_duration(ds, min_s: float = 0.5, max_s: float = 30.0, label: str = ""):
+    """Drop clips outside Whisper's 30 s window (checks the metadata column only —
+    no audio decode, runs in seconds).
+
+    The source datasets carry a few broken rows (e.g. a 348 s clip paired with a
+    one-line transcript): >30 s audio is truncated by the feature extractor while
+    its full transcript remains, which trains hallucination and, past 448 label
+    tokens, crashes the Whisper decoder. In eval sets these rows poison WER.
+    """
+    n0 = ds.num_rows
+    ds = ds.filter(lambda d: min_s <= d <= max_s, input_columns="duration")
+    print(f"[data] duration filter {label} ({min_s}-{max_s}s): "
+          f"kept {ds.num_rows}/{n0} (dropped {n0 - ds.num_rows})")
+    return ds
+
+
 def _sanitize(name: str) -> str:
     """Make a config/unit name safe for a shard filename."""
     return re.sub(r"[^A-Za-z0-9]+", "-", str(name)).strip("-").lower() or "x"

@@ -58,11 +58,14 @@ def main() -> None:
     adapter_dir = args.adapter_dir or os.path.join(cfg["output_dir"], "adapter")
     out_path = args.out or os.path.join(cfg["results_dir"], "finetuned_results.csv")
 
-    from curate import load_curated
+    from curate import filter_duration, load_curated
     from peft import PeftModel
     from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
     ds = load_curated(data_cfg["hf_curated_repo"], split=args.split)
+    # Identical clip window to 02 — apples-to-apples before/after comparison.
+    ds = filter_duration(ds, data_cfg.get("min_duration_sec", 0.5),
+                         data_cfg.get("max_duration_sec", 30.0), label=args.split)
     if args.limit:
         ds = ds.select(range(min(args.limit, ds.num_rows)))
     print(f"Evaluating {ds.num_rows} clips from split '{args.split}' with adapter {adapter_dir}")

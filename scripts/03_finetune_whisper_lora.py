@@ -88,12 +88,26 @@ def main() -> None:
     # entire ~70 GB corpus (all splits) before training starts — that is what
     # silently stalled/filled the disk on free Colab. Train split alone is the
     # bulk of it, but the download is cached and reused by later runs.
+    from curate import filter_duration
+
+    min_s = data_cfg.get("min_duration_sec", 0.5)
+    max_s = data_cfg.get("max_duration_sec", 30.0)
+    # Labels longer than the decoder's max crash training outright; anything
+    # near it comes from the same broken source rows the duration filter drops.
+    max_label = getattr(model.config, "max_target_positions", 448)
+
     print("[data] loading 'train' split (first run downloads it; cached afterwards)")
     train_ds = load_curated(data_cfg["hf_curated_repo"], split="train")
+    train_ds = filter_duration(train_ds, min_s, max_s, label="train")
     if cfg.get("max_train"):
         train_ds = train_ds.select(range(min(cfg["max_train"], train_ds.num_rows)))
     train_ds = train_ds.map(prepare, remove_columns=train_ds.column_names,
                             desc="prepare train")
+    n0 = train_ds.num_rows
+    train_ds = train_ds.filter(lambda l: len(l) <= max_label, input_columns="labels")
+    if train_ds.num_rows < n0:
+        print(f"[data] label-length filter (<= {max_label} tokens): "
+              f"kept {train_ds.num_rows}/{n0}")
 
     # Two in-training eval modes (04_evaluate.py stays the authoritative WER):
     #  - wer_eval: config-driven full generation eval (WER; slow — small models only)
@@ -104,10 +118,12 @@ def main() -> None:
     eval_ds = None
     if do_eval:
         eval_ds = load_curated(data_cfg["hf_curated_repo"], split="validation")
+        eval_ds = filter_duration(eval_ds, min_s, max_s, label="validation")
         if not wer_eval:
             eval_ds = eval_ds.select(range(min(args.eval_loss, eval_ds.num_rows)))
         eval_ds = eval_ds.map(prepare, remove_columns=eval_ds.column_names,
                               desc="prepare eval")
+        eval_ds = eval_ds.filter(lambda l: len(l) <= max_label, input_columns="labels")
 
     # Free generation of language/task during eval.
     model.generation_config.language = cfg["language"]

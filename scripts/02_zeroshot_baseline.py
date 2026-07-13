@@ -54,9 +54,13 @@ def main() -> None:
     data_cfg = load_yaml(args.data_config)
     model_cfg = load_yaml(args.model_config)
 
-    from curate import load_curated
+    from curate import filter_duration, load_curated
 
     ds = load_curated(data_cfg["hf_curated_repo"], split=args.split)
+    # Same clip window as training — the benchmark must be defined identically
+    # for zero-shot and fine-tuned, and >30s broken rows poison WER for both.
+    ds = filter_duration(ds, data_cfg.get("min_duration_sec", 0.5),
+                         data_cfg.get("max_duration_sec", 30.0), label=args.split)
     if args.limit:
         ds = ds.select(range(min(args.limit, ds.num_rows)))
     print(f"Evaluating {ds.num_rows} clips from split '{args.split}' "
