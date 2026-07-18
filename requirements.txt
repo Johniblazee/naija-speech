@@ -1,6 +1,8 @@
 # Core ML
 torch>=2.1
-transformers>=4.46    # >=4.46 for Trainer(processing_class=...); works on v5
+transformers>=4.46,<5  # >=4.46 for Trainer(processing_class=...); <5 because v5
+                       # requires a newer torch (DTensor) than some pod images ship —
+                       # our code runs identically on 4.46+ either way
 datasets>=2.20,<4.0   # AfriSpeech-200 uses a loading script (removed in datasets 4.x)
 accelerate>=0.33
 peft>=0.12

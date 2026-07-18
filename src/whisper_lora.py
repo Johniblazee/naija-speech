@@ -139,8 +139,11 @@ def transcribe_dataset(
     # max_length=448 so transformers stops warning once per batch.
     model.generation_config.max_length = None
 
+    from tqdm import tqdm
+
     hyps: list[str] = []
-    for start in range(0, ds.num_rows, batch_size):
+    for start in tqdm(range(0, ds.num_rows, batch_size),
+                      desc="transcribe", unit="batch"):
         batch = ds[start : start + batch_size]
         arrays = [a["array"] for a in batch["audio"]]
         sr = batch["audio"][0]["sampling_rate"]
