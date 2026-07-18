@@ -29,9 +29,14 @@ def _split_of(path: str) -> str:
 
 
 def read_metadata(repo: str):
-    """Return one DataFrame of metadata columns across every shard (no audio read)."""
+    """Return one DataFrame of metadata columns across every shard (no audio decode).
+
+    Shards resolve through the local HF cache (`hf_hub_download` returns the
+    cached file instantly where training/eval already downloaded the splits),
+    avoiding pandas' `hf://` remote path, which breaks on fsspec version drift.
+    """
     import pandas as pd
-    from huggingface_hub import HfApi
+    from huggingface_hub import HfApi, hf_hub_download
 
     files = [f for f in HfApi().list_repo_files(repo, repo_type="dataset")
              if f.startswith("data/") and f.endswith(".parquet")]
@@ -39,7 +44,8 @@ def read_metadata(repo: str):
     frames = []
     for i, f in enumerate(files):
         try:
-            d = pd.read_parquet(f"hf://datasets/{repo}/{f}", columns=_META_COLS)
+            local = hf_hub_download(repo, f, repo_type="dataset")
+            d = pd.read_parquet(local, columns=_META_COLS)
         except Exception as e:  # noqa: BLE001 — tolerate a bad/edge shard
             print(f"  [warn] {f}: {e}")
             continue
@@ -47,6 +53,9 @@ def read_metadata(repo: str):
         frames.append(d)
         if (i + 1) % 25 == 0:
             print(f"  … {i + 1}/{len(files)} shards")
+    if not frames:
+        raise SystemExit("[verify] every shard read failed — see warnings above; "
+                         "nothing to summarise.")
     return pd.concat(frames, ignore_index=True)
 
 
