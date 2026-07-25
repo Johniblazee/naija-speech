@@ -8,7 +8,7 @@ source: afrispeech-200            # primary source (used by the afrispeech-200 a
 sources:                          # all curated together into ONE unified corpus
   - afrispeech-200
   - afrispeech-dialog
-hf_dataset_id: tobiolatunji/afrispeech-200
+hf_dataset_id: intronhealth/afrispeech-200   # renamed from tobiolatunji/ (old name redirects for load_dataset, but raw manifest URLs do not)
 license: CC-BY-NC-SA-4.0          # non-commercial; research use only
 country_filter: NG               # keep only Nigerian clips
 

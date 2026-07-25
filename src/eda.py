@@ -13,7 +13,7 @@ import pandas as pd
 
 from corpus import macro_accent
 
-_RAW = "https://huggingface.co/datasets/{ds}/raw/main/transcripts/{split}.csv"
+_RAW = "https://huggingface.co/datasets/{ds}/resolve/main/transcripts/{split}.csv"  # resolve: CSVs are LFS now
 _SPLITS = ("train", "dev", "test")
 _GROUP_COLS = ("macro_accent", "accent", "domain", "gender", "age_group", "split")
 
