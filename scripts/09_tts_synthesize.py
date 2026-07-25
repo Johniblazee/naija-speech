@@ -73,14 +73,19 @@ def _load_yarngpt(args):
     from transformers import AutoModelForCausalLM
 
     sys.path.insert(0, args.yarngpt_dir)  # provides yarngpt.audiotokenizer
-    from yarngpt.audiotokenizer import AudioTokenizer
-
-    hf_path = "saheedniyi/YarnGPT"
-    tok = AudioTokenizer(hf_path, args.wavtok_ckpt, args.wavtok_config)
+    v2 = args.yarngpt_version == 2
+    if v2:  # YarnGPT2 = latest (multilingual; we still benchmark lang="english")
+        from yarngpt.audiotokenizer import AudioTokenizerV2 as Tok
+        hf_path = "saheedniyi/YarnGPT2"
+    else:
+        from yarngpt.audiotokenizer import AudioTokenizer as Tok
+        hf_path = "saheedniyi/YarnGPT"
+    tok = Tok(hf_path, args.wavtok_ckpt, args.wavtok_config)
     model = AutoModelForCausalLM.from_pretrained(hf_path, torch_dtype="auto").to(tok.device)
 
     def speak(text, voice, out_path):
-        prompt = tok.create_prompt(text, speaker_name=voice)
+        kw = {"lang": "english"} if v2 else {}
+        prompt = tok.create_prompt(text, speaker_name=voice, **kw)
         ids = tok.tokenize_prompt(prompt)
         out = model.generate(input_ids=ids, temperature=0.1,
                              repetition_penalty=1.1, max_length=4000)
@@ -118,6 +123,8 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=None, help="First N sentences only.")
     ap.add_argument("--voices", type=int, default=3, help="Cap number of voices.")
     ap.add_argument("--yarngpt-dir", default="third_party/yarngpt")
+    ap.add_argument("--yarngpt-version", type=int, default=2, choices=(1, 2),
+                    help="2 = YarnGPT2 (default, latest); 1 = original YarnGPT.")
     ap.add_argument("--wavtok-ckpt", default="third_party/wavtokenizer_large_speech_320_24k.ckpt")
     ap.add_argument("--wavtok-config",
                     default="third_party/wavtokenizer_mediumdata_frame75_3s_nq1_code4096_dim512_kmeans200_attn.yaml")
