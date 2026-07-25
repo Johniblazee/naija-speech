@@ -20,7 +20,9 @@ _GROUP_COLS = ("macro_accent", "accent", "domain", "gender", "age_group", "split
 
 def _download(ds: str, split: str, cache_dir: Path) -> Path:
     cache_dir.mkdir(parents=True, exist_ok=True)
-    dest = cache_dir / f"{split}.csv"
+    # dataset id in the cache key: a renamed repo must not reuse stale files
+    # (the old {split}.csv cache served a truncated manifest for weeks)
+    dest = cache_dir / f"{ds.replace('/', '_')}_{split}.csv"
     if not dest.exists():
         urllib.request.urlretrieve(_RAW.format(ds=ds, split=split), dest)
     return dest

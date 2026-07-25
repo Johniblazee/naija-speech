@@ -3,10 +3,12 @@
 Answers the three questions the TTS fine-tunes depend on, WITHOUT re-downloading
 the 70 GB corpus:
 
-  A. Speaker backfill — can AfriSpeech-200 rows recover their speaker IDs by
-     joining the source transcript manifest on transcript text?  (Orpheus needs
-     speaker conditioning; our curated schema has empty speaker_id for that source.)
-     -> metadata-only: DuckDB reads JUST the text/accent/duration columns out of
+  A. Speaker backfill — recover speaker IDs for AfriSpeech-200 rows by joining
+     the stored audio path ({recording-uuid}/{file}.wav) against the tail of the
+     source manifest's audio_paths.  (Orpheus needs speaker conditioning; our
+     curated schema has empty speaker_id for that source.)  Proven 100 % coverage
+     in Phase 0 (2026-07-19); supersedes the transcript-text join (14.2 %).
+     -> metadata-only: DuckDB reads JUST the path/text/accent columns out of
         the remote parquet shards (columnar projection; ~MBs, not GBs).
 
   B. Sample rates & channels — what did "store native" actually store?
@@ -42,47 +44,29 @@ OUT_DIR = "outputs/tts_audit"
 # --------------------------------------------------------------------------- #
 # A. Speaker backfill (metadata-only, remote columnar reads)
 # --------------------------------------------------------------------------- #
-def _norm_text(s: str) -> str:
-    return " ".join(str(s).split()).strip().lower()
+def _path_tail(p: str) -> str:
+    """Last two path components: '{recording-uuid}/{file}.wav'."""
+    parts = str(p).replace("\\", "/").strip("/").split("/")
+    return "/".join(parts[-2:])
 
 
 def match_speakers(corpus_df, manifest_df):
-    """Join corpus rows to manifest user_ids by transcript text.
+    """Join corpus rows to manifest user_ids by stored audio-path tail.
 
-    Tiers: (1) text unique in manifest -> direct match; (2) text ambiguous ->
-    disambiguate by (accent, duration rounded to 0.1 s); (3) still ambiguous;
-    (4) text not in manifest at all. Returns (annotated corpus_df, tier counts).
+    The curated corpus preserves the source's per-recording directory in
+    audio.path; the manifest's audio_paths end with the same two components,
+    so the join is exact. Tiers: path_match / unmatched.
     """
-    import pandas as pd
-
-    m = manifest_df.copy()
-    m["key"] = m["transcript"].map(_norm_text)
     corpus_df = corpus_df.copy()
-    corpus_df["key"] = corpus_df["text_raw"].map(_norm_text)
-
-    per_key = m.groupby("key")["user_ids"].nunique()
-    unique_keys = set(per_key[per_key == 1].index)
-    key_to_user = m.drop_duplicates("key").set_index("key")["user_ids"]
-
-    m["key2"] = m["key"] + "|" + m["accent"].astype(str) + "|" + m["duration"].round(1).astype(str)
-    per_key2 = m.groupby("key2")["user_ids"].nunique()
-    unique_key2 = set(per_key2[per_key2 == 1].index)
-    key2_to_user = m.drop_duplicates("key2").set_index("key2")["user_ids"]
-
-    tiers, users = [], []
-    for _, r in corpus_df.iterrows():
-        k = r["key"]
-        if k in unique_keys:
-            tiers.append("unique_text"); users.append(key_to_user[k]); continue
-        k2 = k + "|" + str(r["accent"]) + "|" + str(round(float(r["duration"]), 1))
-        if k2 in unique_key2:
-            tiers.append("text_accent_dur"); users.append(key2_to_user[k2]); continue
-        if k in set(m["key"]):
-            tiers.append("ambiguous"); users.append(None)
-        else:
-            tiers.append("unmatched"); users.append(None)
-    corpus_df["backfill_tier"] = tiers
-    corpus_df["backfilled_speaker"] = users
+    corpus_df["key"] = corpus_df["apath"].map(_path_tail)
+    m = manifest_df.copy()
+    m["key"] = m["audio_paths"].map(_path_tail)
+    # same tail = same recording = same speaker; the manifest lists some
+    # recordings more than once, and .map() needs a unique index
+    m = m.drop_duplicates(subset=["key"])
+    corpus_df["backfilled_speaker"] = corpus_df["key"].map(m.set_index("key")["user_ids"])
+    corpus_df["backfill_tier"] = corpus_df["backfilled_speaker"].notna().map(
+        {True: "path_match", False: "unmatched"})
     counts = corpus_df["backfill_tier"].value_counts().to_dict()
     return corpus_df, counts
 
@@ -100,10 +84,12 @@ def audit_speakers(cfg):
     print(f"[A] reading corpus metadata columns remotely via DuckDB (no audio) …")
     con = duckdb.connect()
     corpus = con.execute(
-        f"""SELECT text_raw, accent, domain, duration, gender
-            FROM read_parquet('hf://datasets/{repo}/data/*.parquet')
+        f"""SELECT audio.path AS apath, text_raw, accent, domain, duration, gender, filename
+            FROM read_parquet('hf://datasets/{repo}/data/*.parquet', filename=true)
             WHERE source = 'afrispeech-200'"""
     ).df()
+    corpus["split"] = corpus.pop("filename").map(
+        lambda f: os.path.basename(str(f)).split("-")[0])
     print(f"[A] corpus rows (afrispeech-200): {len(corpus):,}")
 
     print("[A] loading source transcript manifest …")
@@ -113,11 +99,17 @@ def audit_speakers(cfg):
 
     annotated, counts = match_speakers(corpus, manifest)
     total = len(annotated)
-    matched = counts.get("unique_text", 0) + counts.get("text_accent_dur", 0)
-    print(f"\n[A] SPEAKER BACKFILL: {matched:,}/{total:,} rows recoverable "
+    matched = counts.get("path_match", 0)
+    print(f"\n[A] SPEAKER BACKFILL (path join): {matched:,}/{total:,} rows "
           f"({matched / total:.1%})")
     for tier, n in sorted(counts.items(), key=lambda kv: -kv[1]):
         print(f"     {tier:<16} {n:>8,}  ({n / total:.1%})")
+
+    train = annotated[annotated["split"] == "train"].dropna(subset=["backfilled_speaker"])
+    per_spk = train.groupby("backfilled_speaker").size()
+    big = per_spk[per_spk >= 50]
+    print(f"[A] train speakers: {per_spk.size:,} | with >=50 clips: {big.size:,} "
+          f"({int(big.sum()):,} clips) — Orpheus conditioning pool")
     os.makedirs(OUT_DIR, exist_ok=True)
     annotated.drop(columns=["key"]).to_csv(
         os.path.join(OUT_DIR, "speaker_backfill.csv"), index=False)
@@ -216,8 +208,8 @@ def write_report(cfg, speaker_counts, speaker_total, audio_df):
              "Phase 0 of the TTS track. Heuristic quality proxies; UTMOSv2 scoring",
              "happens at selection time on GPU.", ""]
     if speaker_counts:
-        matched = speaker_counts.get("unique_text", 0) + speaker_counts.get("text_accent_dur", 0)
-        lines += ["## A. Speaker backfill (afrispeech-200 rows)", "",
+        matched = speaker_counts.get("path_match", 0)
+        lines += ["## A. Speaker backfill (afrispeech-200 rows, path join)", "",
                   f"- Recoverable: **{matched:,}/{speaker_total:,} ({matched/speaker_total:.1%})**"]
         lines += [f"- {t}: {n:,} ({n/speaker_total:.1%})" for t, n in sorted(
             speaker_counts.items(), key=lambda kv: -kv[1])]
@@ -243,21 +235,20 @@ def self_test():
     import pandas as pd
 
     manifest = pd.DataFrame({
-        "transcript": ["Hello world", "Hello world", "Unique line", "Shared text", "Shared text"],
-        "user_ids": ["u1", "u2", "u3", "u4", "u4"],
-        "accent": ["yoruba", "igbo", "hausa", "igbo", "igbo"],
-        "duration": [2.0, 3.0, 4.0, 5.0, 5.0],
+        "audio_paths": ["/AfriSpeech-100/train/aaa-111/rec1.wav",
+                        "/AfriSpeech-100/train/bbb-222/rec2.wav",
+                        "/data/train/aaa-111/rec1.wav"],  # dup tail, other prefix
+        "user_ids": ["u1", "u2", "u1"],
     })
     corpus = pd.DataFrame({
-        "text_raw": ["Unique line", "Hello  world", "Shared text", "Never seen"],
-        "accent": ["hausa", "yoruba", "igbo", "tiv"],
-        "duration": [4.0, 2.01, 5.0, 1.0],
-        "domain": ["general"] * 4, "gender": ["Male"] * 4,
+        "apath": ["aaa-111/rec1.wav", "ccc-333/rec9.wav"],
+        "accent": ["yoruba", "tiv"], "duration": [2.0, 1.0],
+        "domain": ["general"] * 2, "gender": ["Male"] * 2,
     })
     out, counts = match_speakers(corpus, manifest)
-    assert out.backfill_tier.tolist() == ["unique_text", "text_accent_dur",
-                                          "unique_text", "unmatched"], out.backfill_tier.tolist()
-    assert out.backfilled_speaker.tolist()[:3] == ["u3", "u1", "u4"]
+    assert out.backfill_tier.tolist() == ["path_match", "unmatched"], out.backfill_tier.tolist()
+    assert out.backfilled_speaker.tolist()[0] == "u1"
+    assert counts == {"path_match": 1, "unmatched": 1}, counts
 
     sr = 16000
     t = np.linspace(0, 1, sr, endpoint=False)
