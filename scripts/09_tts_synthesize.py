@@ -44,7 +44,10 @@ def _ref_voices():
     path = os.path.join(EVAL_DIR, "ref_voices.csv")
     if not os.path.exists(path):
         raise SystemExit(f"{path} missing — run scripts/08_build_tts_evalset.py first")
-    return pd.read_csv(path).to_dict("records")
+    df = pd.read_csv(path)
+    # the CSV may have been generated on Windows — normalize path separators
+    df["wav"] = df["wav"].str.replace("\\", "/", regex=False)
+    return df.to_dict("records")
 
 
 # --------------------------------------------------------------------------- #
