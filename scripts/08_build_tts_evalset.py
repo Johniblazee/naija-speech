@@ -69,21 +69,23 @@ def _read_split(repo: str, split: str, with_filename: bool = False):
     return df
 
 
-def build_evalset(df, cfg, n: int, seed: int):
-    """Screen (duration window + general domain), then a seeded sample of n."""
+def build_evalset(df, cfg, n: int, seed: int, domain: str = "general"):
+    """Screen (duration window + one domain), then a seeded sample of n."""
     from corpus import macro_accent
 
     lo = cfg.get("min_duration_sec", 0.5)
     hi = cfg.get("max_duration_sec", 30.0)
     mm = {k.lower(): v for k, v in cfg.get("macro_accent_map", {}).items()}
     df = df[(df["duration"] >= lo) & (df["duration"] <= hi)]
-    df = df[df["domain"] == "general"].copy()
+    df = df[df["domain"] == domain].copy()
     df["macro_accent"] = df["accent"].map(lambda a: macro_accent(a, mm))
     # sort before sampling so the seed is reproducible regardless of read order
     df = df.sort_values("apath").reset_index(drop=True)
     sample = df.sample(n=min(n, len(df)), random_state=seed).sort_values("apath")
     sample = sample.reset_index(drop=True)
-    sample.insert(0, "eval_id", [f"tts-{i:03d}" for i in range(len(sample))])
+    # "tts-NNN" is the locked general set's id space; other domains get their own
+    prefix = "tts" if domain == "general" else domain[:3]
+    sample.insert(0, "eval_id", [f"{prefix}-{i:03d}" for i in range(len(sample))])
     sample = sample.rename(columns={"text_raw": "text"})
     return sample[["eval_id", "text", "accent", "macro_accent", "domain",
                    "duration", "apath"]]
@@ -195,10 +197,16 @@ def main() -> None:
     ap.add_argument("--config", default="configs/data_afrispeech_ng.yaml")
     ap.add_argument("--n", type=int, default=200)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--domain", default="general",
+                    help="Corpus domain to sample from (e.g. clinical for the supplement).")
+    ap.add_argument("--out", default="evalset.csv",
+                    help="Output CSV name inside outputs/tts_eval/.")
     ap.add_argument("--skip-refs", action="store_true",
-                    help="Only build evalset.csv (no shard download).")
+                    help="Only build the evalset CSV (no shard download).")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
+    if args.domain != "general":
+        args.skip_refs = True  # ref voices are domain-independent and already built
 
     if args.self_test:
         self_test()
@@ -213,10 +221,10 @@ def main() -> None:
 
     print("[evalset] reading test metadata (no audio) ...")
     test = _read_split(repo, "test")
-    sample = build_evalset(test, cfg, args.n, args.seed)
-    path = os.path.join(OUT_DIR, "evalset.csv")
+    sample = build_evalset(test, cfg, args.n, args.seed, args.domain)
+    path = os.path.join(OUT_DIR, args.out)
     sample.to_csv(path, index=False)
-    print(f"[evalset] {len(sample)} sentences -> {path}")
+    print(f"[evalset] {len(sample)} {args.domain} sentences -> {path}")
     print(sample["macro_accent"].value_counts().to_string())
     print(f"[evalset] text length: median "
           f"{int(sample['text'].str.len().median())} chars, "

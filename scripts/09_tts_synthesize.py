@@ -123,6 +123,10 @@ BACKENDS = {"xtts": _load_xtts, "yarngpt": _load_yarngpt, "qwen3tts": _load_qwen
 def main() -> None:
     ap = argparse.ArgumentParser(description="Zero-shot TTS synthesis over the fixed eval set.")
     ap.add_argument("--model", required=True, choices=sorted(BACKENDS))
+    ap.add_argument("--evalset", default=os.path.join(EVAL_DIR, "evalset.csv"),
+                    help="Sentence CSV (e.g. the clinical supplement).")
+    ap.add_argument("--tag", default="",
+                    help="Suffix for the output dir, e.g. clinical -> <model>-clinical/.")
     ap.add_argument("--limit", type=int, default=None, help="First N sentences only.")
     ap.add_argument("--voices", type=int, default=3, help="Cap number of voices.")
     ap.add_argument("--yarngpt-dir", default="third_party/yarngpt")
@@ -136,15 +140,16 @@ def main() -> None:
     import pandas as pd
     import soundfile as sf
 
-    evalset = pd.read_csv(os.path.join(EVAL_DIR, "evalset.csv"))
+    evalset = pd.read_csv(args.evalset)
     if args.limit:
         evalset = evalset.head(args.limit)
 
     voices, speak = BACKENDS[args.model](args)
     voices = voices[: args.voices]
-    wav_dir = os.path.join(EVAL_DIR, args.model, "wav")
+    run_name = args.model + (f"-{args.tag}" if args.tag else "")
+    wav_dir = os.path.join(EVAL_DIR, run_name, "wav")
     os.makedirs(wav_dir, exist_ok=True)
-    print(f"[{args.model}] {len(evalset)} sentences x {len(voices)} voices -> {wav_dir}")
+    print(f"[{run_name}] {len(evalset)} sentences x {len(voices)} voices -> {wav_dir}")
 
     rows, done = [], 0
     for _, s in evalset.iterrows():
@@ -168,13 +173,13 @@ def main() -> None:
         if done % 20 == 0:
             print(f"  ... {done}/{len(evalset)} sentences")
 
-    mpath = os.path.join(EVAL_DIR, args.model, "manifest.csv")
+    mpath = os.path.join(EVAL_DIR, run_name, "manifest.csv")
     pd.DataFrame(rows).to_csv(mpath, index=False)
     timed = [r for r in rows if r["synth_sec"]]
     if timed:
         rtf = sum(r["synth_sec"] for r in timed) / sum(r["audio_sec"] for r in timed)
-        print(f"[{args.model}] RTF (synth_sec/audio_sec, this run): {rtf:.2f}")
-    print(f"[{args.model}] {len(rows)} clips -> {mpath}")
+        print(f"[{run_name}] RTF (synth_sec/audio_sec, this run): {rtf:.2f}")
+    print(f"[{run_name}] {len(rows)} clips -> {mpath}")
 
 
 if __name__ == "__main__":
