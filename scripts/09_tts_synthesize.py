@@ -129,7 +129,9 @@ def main() -> None:
                     help="Suffix for the output dir, e.g. clinical -> <model>-clinical/.")
     ap.add_argument("--limit", type=int, default=None, help="First N sentences only.")
     ap.add_argument("--voices", type=int, default=3, help="Cap number of voices.")
-    ap.add_argument("--yarngpt-dir", default="third_party/yarngpt")
+    # the repo ROOT is the package (audiotokenizer.py top-level), so the import
+    # path is its PARENT: sys.path gets third_party/, `yarngpt/` is the package
+    ap.add_argument("--yarngpt-dir", default="third_party")
     ap.add_argument("--yarngpt-version", type=int, default=2, choices=(1, 2),
                     help="2 = YarnGPT2 (default, latest); 1 = original YarnGPT.")
     ap.add_argument("--wavtok-ckpt", default="third_party/wavtokenizer_large_speech_320_24k.ckpt")
