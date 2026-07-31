@@ -67,11 +67,23 @@ def main() -> None:
                     help="Defaults to <model output_dir>/adapter, else the local bundle.")
     ap.add_argument("--judges", default="both", choices=("both", "ft", "base"))
     ap.add_argument("--skip-utmos", action="store_true")
+    ap.add_argument("--utmos-only", action="store_true",
+                    help="Only add predicted MOS to an existing scores.csv.")
     args = ap.parse_args()
 
     import pandas as pd
 
     mdir = os.path.join(EVAL_DIR, args.model)
+    if args.utmos_only:  # add MOS to an existing scores.csv, no re-transcription
+        spath = os.path.join(mdir, "scores.csv")
+        scores = pd.read_csv(spath)
+        mos = _utmos_scores(os.path.join(mdir, "wav"))
+        scores["predicted_mos"] = scores["wav"].map(
+            lambda w: mos.get(os.path.basename(w)))
+        scores.to_csv(spath, index=False)
+        print(f"[score] mean predicted MOS: {scores['predicted_mos'].mean():.2f} -> {spath}")
+        return
+
     manifest = pd.read_csv(os.path.join(mdir, "manifest.csv"))
     manifest = manifest[manifest["wav"].map(os.path.exists)].reset_index(drop=True)
     print(f"[score] {len(manifest)} clips from {mdir}")
@@ -101,13 +113,21 @@ def main() -> None:
             compute_wer_cer([r], [h])["wer"]
             for r, h in zip(manifest["text"], hyps)]
 
+    # persist transcriptions BEFORE the optional MOS step — they cost GPU-hours,
+    # MOS costs minutes and can be re-added anytime with --utmos-only
+    manifest.to_csv(os.path.join(mdir, "scores.csv"), index=False)
+
     if not args.skip_utmos:
-        mos = _utmos_scores(os.path.join(mdir, "wav"))
+        try:
+            mos = _utmos_scores(os.path.join(mdir, "wav"))
+        except Exception as e:
+            print(f"[utmos] failed ({e}) — MOS skipped; transcriptions are saved. "
+                  f"Add later with --utmos-only in a torch>=2.6 env.")
+            mos = {}
         if mos:
             manifest["predicted_mos"] = manifest["wav"].map(
                 lambda w: mos.get(os.path.basename(w)))
-
-    manifest.to_csv(os.path.join(mdir, "scores.csv"), index=False)
+            manifest.to_csv(os.path.join(mdir, "scores.csv"), index=False)
 
     agg = []
     for name in judges:
