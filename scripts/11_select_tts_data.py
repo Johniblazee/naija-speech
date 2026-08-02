@@ -124,7 +124,11 @@ def stage_audio(cfg, pool_hours, shards_dir=None):
             raise SystemExit(f"no train-*.parquet under {shards_dir}")
         print(f"[audio] reading {len(files)} local shards from {shards_dir}")
         stream = load_dataset("parquet", data_files=files, split="train",
-                              streaming=True)  # audio arrives as raw struct dicts
+                              streaming=True)
+        try:  # parquet embeds the Audio feature -> rows decode by default; ask for bytes
+            stream = stream.cast_column("audio", Audio(decode=False))
+        except Exception:
+            pass  # no embedded feature: rows are already raw struct dicts
     else:
         stream = (load_dataset(cfg["hf_curated_repo"], split="train", streaming=True)
                   .cast_column("audio", Audio(decode=False)))
@@ -133,10 +137,13 @@ def stage_audio(cfg, pool_hours, shards_dir=None):
 
     pbar = tqdm(total=int(pool_hours * 3600), unit="s", desc="staged audio",
                 dynamic_ncols=True)
+    import numpy as np
+
     for c in stream:
         if done_s >= pool_hours * 3600:
             break
-        apath = (c["audio"] or {}).get("path")
+        a = c["audio"] or {}
+        apath = a.get("path")
         if apath not in want:
             continue
         i = want[apath]
@@ -147,15 +154,19 @@ def stage_audio(cfg, pool_hours, shards_dir=None):
             pbar.update(int(dur))
             rows.append({"idx": i, "apath": apath, "wav": out})
             continue
-        b = (c["audio"] or {}).get("bytes")
-        if not b:
+        # audio may arrive as raw bytes (decode=False) OR a decoded array
+        # (local parquet reconstructs the embedded Audio feature) — accept both
+        if a.get("bytes"):
+            try:
+                x, sr = sf.read(io.BytesIO(a["bytes"]), dtype="float32")
+            except Exception:
+                continue
+        elif a.get("array") is not None:
+            x, sr = np.asarray(a["array"], dtype="float32"), a["sampling_rate"]
+        else:
             continue
-        try:
-            x, sr = sf.read(io.BytesIO(b), dtype="float32")
-        except Exception:
-            continue
-        if x.ndim > 1:
-            x = x.mean(axis=1)
+        if x.ndim > 1:  # (n, ch) from soundfile or (ch, n) from decoders
+            x = x.mean(axis=int(np.argmin(x.shape)))
         q = audit.quality_heuristics(x, sr)
         if q["clipping_pct"] > 1.0 or q["silence_pct"] > 60.0:
             continue  # not TTS-grade
