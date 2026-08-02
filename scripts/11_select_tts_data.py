@@ -129,6 +129,10 @@ def stage_audio(cfg, pool_hours, shards_dir=None):
         stream = (load_dataset(cfg["hf_curated_repo"], split="train", streaming=True)
                   .cast_column("audio", Audio(decode=False)))
     print(f"[audio] streaming until {pool_hours} h of staged audio ...")
+    from tqdm import tqdm
+
+    pbar = tqdm(total=int(pool_hours * 3600), unit="s", desc="staged audio",
+                dynamic_ncols=True)
     for c in stream:
         if done_s >= pool_hours * 3600:
             break
@@ -138,7 +142,9 @@ def stage_audio(cfg, pool_hours, shards_dir=None):
         i = want[apath]
         out = os.path.join(WAV_DIR, f"{i:06d}.wav")
         if os.path.exists(out):  # resume
-            done_s += sf.info(out).duration
+            dur = sf.info(out).duration
+            done_s += dur
+            pbar.update(int(dur))
             rows.append({"idx": i, "apath": apath, "wav": out})
             continue
         b = (c["audio"] or {}).get("bytes")
@@ -158,10 +164,13 @@ def stage_audio(cfg, pool_hours, shards_dir=None):
             continue
         y = librosa.resample(y, orig_sr=sr, target_sr=TARGET_SR)
         sf.write(out, y, TARGET_SR, subtype="PCM_16")
-        done_s += y.size / TARGET_SR
+        dur = y.size / TARGET_SR
+        done_s += dur
+        pbar.update(int(dur))
         rows.append({"idx": i, "apath": apath, "wav": out})
-        if len(rows) % 500 == 0:
-            print(f"  ... {len(rows):,} staged, {done_s / 3600:.1f} h")
+        if len(rows) % 100 == 0:
+            pbar.set_postfix(clips=f"{len(rows):,}")
+    pbar.close()
     pd.DataFrame(rows).to_csv(os.path.join(OUT_DIR, "staged.csv"), index=False)
     print(f"[audio] staged {len(rows):,} clips / {done_s / 3600:.1f} h -> {WAV_DIR}")
 
