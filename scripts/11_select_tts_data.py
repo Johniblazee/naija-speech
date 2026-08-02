@@ -100,8 +100,13 @@ def trim_pad(x, sr, top_db=35, pad_ms=100):
     return np.concatenate([y, np.zeros(int(sr * pad_ms / 1000), dtype=y.dtype)])
 
 
-def stage_audio(cfg, pool_hours):
-    """Stream candidates, gate on heuristics, export 24 kHz mono staging WAVs."""
+def stage_audio(cfg, pool_hours, shards_dir=None):
+    """Stream candidates, gate on heuristics, export 24 kHz mono staging WAVs.
+
+    shards_dir: local dir of downloaded train-*.parquet shards — reads locally
+    (fast, no CDN timeouts) instead of streaming from the Hub.
+    """
+    import glob
     import librosa
     import pandas as pd
     import soundfile as sf
@@ -113,8 +118,16 @@ def stage_audio(cfg, pool_hours):
     os.makedirs(WAV_DIR, exist_ok=True)
     done_s = 0.0
     rows = []
-    stream = (load_dataset(cfg["hf_curated_repo"], split="train", streaming=True)
-              .cast_column("audio", Audio(decode=False)))
+    if shards_dir:
+        files = sorted(glob.glob(os.path.join(shards_dir, "train-*.parquet")))
+        if not files:
+            raise SystemExit(f"no train-*.parquet under {shards_dir}")
+        print(f"[audio] reading {len(files)} local shards from {shards_dir}")
+        stream = load_dataset("parquet", data_files=files, split="train",
+                              streaming=True)  # audio arrives as raw struct dicts
+    else:
+        stream = (load_dataset(cfg["hf_curated_repo"], split="train", streaming=True)
+                  .cast_column("audio", Audio(decode=False)))
     print(f"[audio] streaming until {pool_hours} h of staged audio ...")
     for c in stream:
         if done_s >= pool_hours * 3600:
@@ -253,6 +266,10 @@ def main() -> None:
     ap.add_argument("--stage", default="all", choices=("all", "meta", "audio", "score", "lists"))
     ap.add_argument("--pool-hours", type=float, default=25.0,
                     help="Hours to stage for scoring (superset of the final cut).")
+    ap.add_argument("--shards-dir", default=None,
+                    help="Local dir of downloaded train-*.parquet shards "
+                         "(hf download ... --include 'data/train-*.parquet'); "
+                         "reads locally instead of streaming from the Hub.")
     ap.add_argument("--hours", type=float, default=10.0,
                     help="Final training-set size (top-MOS, accent-capped).")
     ap.add_argument("--val-frac", type=float, default=0.02)
@@ -268,7 +285,7 @@ def main() -> None:
     if args.stage in ("all", "meta"):
         stage_meta(cfg)
     if args.stage in ("all", "audio"):
-        stage_audio(cfg, args.pool_hours)
+        stage_audio(cfg, args.pool_hours, args.shards_dir)
     if args.stage in ("all", "score"):
         stage_score()
     if args.stage in ("all", "lists"):
