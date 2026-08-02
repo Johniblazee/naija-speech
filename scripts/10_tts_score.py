@@ -75,6 +75,11 @@ def main() -> None:
 
     mdir = os.path.join(EVAL_DIR, args.model)
     if args.utmos_only:  # add MOS to an existing scores.csv, no re-transcription
+        try:
+            import utmosv2  # noqa: F401 — this mode's ONLY job is MOS: fail loudly
+        except ImportError:
+            raise SystemExit('utmosv2 not installed — pip install '
+                             '"git+https://github.com/sarulab-speech/UTMOSv2.git"')
         spath = os.path.join(mdir, "scores.csv")
         scores = pd.read_csv(spath)
         mos = _utmos_scores(os.path.join(mdir, "wav"))
