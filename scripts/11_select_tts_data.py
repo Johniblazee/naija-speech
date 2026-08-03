@@ -239,8 +239,12 @@ def stage_lists(hours, val_frac, seed=42):
           f"{sel.groupby('macro_accent')['duration'].sum().div(3600).round(1).to_dict()}")
 
     spk_ids = {s: i for i, s in enumerate(sorted(sel["speaker"].unique()))}
-    # pipe is the list delimiter — it must never appear in the text
-    texts = sel["text_raw"].astype(str).str.replace("|", "/", regex=False)
+    # pipe is the list delimiter and newlines split phonemizer's output —
+    # neither may survive into the text
+    texts = (sel["text_raw"].astype(str)
+             .str.replace("|", "/", regex=False)
+             .str.replace(r"\s+", " ", regex=True)
+             .str.strip())
     print(f"[lists] phonemizing {len(texts):,} transcripts (espeak-ng) ...")
     sel = sel.assign(ipa=_phonemize(texts.tolist()),
                      spk=sel["speaker"].map(spk_ids))
