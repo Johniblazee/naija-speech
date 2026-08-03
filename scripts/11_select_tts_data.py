@@ -219,10 +219,22 @@ def select_clips(df, hours, accent_cap=0.5):
 
 
 def _phonemize(texts):
-    from phonemizer import phonemize
+    """One text at a time, re-joining multi-line output.
 
-    return phonemize(texts, language="en-us", backend="espeak",
-                     preserve_punctuation=True, with_stress=True)
+    Batch mode breaks alignment: espeak emits extra lines for language-switch
+    flags on foreign-looking words (Nigerian names!), so N inputs can return
+    >N outputs. Per-item calls make misalignment structurally impossible.
+    """
+    from phonemizer.backend import EspeakBackend
+    from tqdm import tqdm
+
+    be = EspeakBackend("en-us", preserve_punctuation=True, with_stress=True,
+                       language_switch="remove-flags")
+    out = []
+    for t in tqdm(texts, desc="phonemizing", dynamic_ncols=True):
+        ph = be.phonemize([t], strip=True)
+        out.append(" ".join(p.strip() for p in ph if p and p.strip()))
+    return out
 
 
 def stage_lists(hours, val_frac, seed=42):
